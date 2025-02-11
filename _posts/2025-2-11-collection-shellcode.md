@@ -11,7 +11,7 @@ layout: post
 
 1 bài shellcode chẵn lẻ (angstromCTF 2022)
 
-file [here](/assets/files/parity-angstrom2022)
+file [here](/assets/files/parity-angstrom2022.rar)
 
 - chương trình rất đơn giản , đầu tiên tạo vùng nhớ bằng cách **mmap** , read 2000 bytes vào và gọi nó , đây là 1 bài shellcode điển hình tuy nhiên nó có 1 số điều kiện 
 
