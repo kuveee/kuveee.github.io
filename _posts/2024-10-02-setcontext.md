@@ -474,7 +474,7 @@ p.interactive()
 
 ref : 
 
-https://blog.wingszeng.top/pwn-glibc-setcontext/
+[1](https://blog.wingszeng.top/pwn-glibc-setcontext/)
     
-https://surager.pub/_posts/2020-06-27-%E4%BB%8EDASCTF6%E6%9C%88%E8%B5%9B%E4%B8%AD%E5%AD%A6%E4%B9%A0setcontext%E7%BB%95%E8%BF%87seccomp/
+[2](https://surager.pub/_posts/2020-06-27-%E4%BB%8EDASCTF6%E6%9C%88%E8%B5%9B%E4%B8%AD%E5%AD%A6%E4%B9%A0setcontext%E7%BB%95%E8%BF%87seccomp/)
 
