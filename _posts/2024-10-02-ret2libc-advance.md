@@ -1,6 +1,6 @@
 ---
 title: "ret2libc-advance"
-date: 2024-10-02 00:00:00 +0800
+date: 2025-02-11 00:00:00 +0800
 categories: [pwn]
 tags: [technical]
 author: "kuvee"
