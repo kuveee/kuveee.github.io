@@ -481,7 +481,7 @@ mov rax,1
 syscall
 ```
 
-enjoy flag 
+enjoy flag ^^
 
 ![kaka](/assets/images/flag.10.png)
 
