@@ -584,7 +584,7 @@ ref : [here](https://elijahchia.gitbook.io/ctf-blog/hkcert-ctf-24/shellcode-runn
 
 - bài này là 1 bài filter các byte shellcode 
 
-dowload [here](/kuveee.github.io/assets/files/soulcode.rar)
+dowload [here](/assets/files/soulcode.rar)
 
 ### analys
 
