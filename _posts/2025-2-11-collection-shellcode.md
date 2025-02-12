@@ -830,3 +830,5 @@ p.interactive()
 - đợi tầm 10s và ta có flag =))) 
 
 ![flag](/assets/images/flaghehe.png)
+
+ref : [here](https://orcinus-orca.tistory.com/248) and [here](https://orcinus-orca.tistory.com/248) , [here](https://www.ired.team/offensive-security/code-injection-process-injection/writing-custom-shellcode-encoders-and-decoders#raw-shellcode)
