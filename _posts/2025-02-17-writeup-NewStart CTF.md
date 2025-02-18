@@ -114,7 +114,7 @@ flag{IT_15_R3Al1y_V3Ry-51Mp1e}
 
 - ở đây ta thấy chuỗi ```correct flag``` và đây có lẽ cũng là target của bài  
 
-![here](/kuveee.github.io/assets/images/newstart/week1/rev/4.png)
+![here](/assets/images/newstart/week1/rev/4.png)
 
 - ta thấy nó dùng strlen() để check , có lẽ đó là độ dài flag , tiếp theo là so sánh chuỗi với input()  , chuỗi đó nhìn khá giống ```base64``` , ngoài ra còn 1 hàm ```sub_1400014E0``` mà ta chưa xem xét
 
