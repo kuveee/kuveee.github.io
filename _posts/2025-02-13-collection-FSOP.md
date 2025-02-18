@@ -1666,11 +1666,11 @@ struct _IO_FILE_complete
 
 - đặt break point tại ```fread``` và đi sâu vào hàm này , ta thấy nó gọi ```_IO_file_read``` với các tham số như ta đã nói ở trên
 
-![here](/kuveee.github.io/assets/images/write.png)
+![here](/assets/images/write.png)
 
 - lúc này  khi mình thử nhập 1 dữ liệu rác thì nó đã ghi vào ```overwrite_me``` -> vậy giờ ta sẽ nhập dữ liệu thõa mãn đề để lấy flag
 
-![here](/kuveee.github.io/assets/images/got.png)
+![here](/assets/images/got.png)
 
 exp: 
 
@@ -1731,7 +1731,7 @@ p.interactive()
 
 - flag : 
 
-![here](/kuveee.github.io/assets/images/flagzz.png)
+![here](/assets/images/flagzz.png)
 
 
 ## _IO_FILE Arbitrary Address Read
@@ -1981,4 +1981,4 @@ p.sendlineafter(b'Data: ',payload)
 p.interactive()
 ```
 
-![here](/kuveee.github.io/assets/images/flagkaka.png)
+![here](/assets/images/flagkaka.png)
