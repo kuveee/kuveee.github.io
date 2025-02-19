@@ -214,3 +214,105 @@ LABEL_15:
 ```
 flag{y0u_kn0w_base64_well}
 ```
+
+##### begin
+
+- 1 bài giới thiệu về cách sử dụng IDA 
+
+- nó bảo rằng flag có độ dài là 50 và không có khoảng trống , có 3 part cần phải tìm 
+
+```c
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  _main(argc, argv, envp);
+  puts(
+    "This program will teach you the basic use of IDA, including viewing variables, searching strings, cross referencing, etc");
+  puts("Please open this program with IDA, and we will tell you the flag step by step");
+  puts("First:You should press F5 to decompile the main function");
+  strcpy((char *)&flag_part1, "OK,You can click on this variable to discover the first part\n");
+  puts("The flag has three parts with a total length of 50");
+  puts("There are no spaces in the flag");
+  puts("If you find that flag part1 is garbled, please press the ' a ' key");
+  puts("The second part of the flag can be achieved by pressing shift+F12");
+  system("pause");
+  return 0;
+}
+```
+
+- part 1 sẽ ở trong 1 biến có tên là ```flag_part1``` : 
+
+```
+0x6B614D7B67616C66
+```
+
+- part 2 có được bằng cách dùng ```shift + f12``` để tìm kiếm chuỗi: 
+
+![here](/assets/images/newstart/week1/rev/6.png)
+
+
+```3Ff0rt_tO_5eArcH_```
+
+- part cuối thì ta tham chiếu đến hàm chứa chuỗi này và flag cũng chính là tên hàm 
+
+![here](/assets/images/newstart/week1/rev/7.png)
+
+- cuối cùng ghép tất cả lại , ta có: 
+
+```
+flag{Mak3Ff0rt_tO_5eArcH_F0r_th3_f14g_C0Rpse}
+```
+
+#### crypto 
+
+##### xor
+
+- đầu tiên là nó chuyển 13 kí tự đầu của flag thành 1 số nguyên -> m1
+- lưu các kí tự còn lại -> m2
+- tiếp theo nó sẽ ```xor``` m1 với key -> c1
+- cuối cùng là ```xor``` key với m2
+
+như đã thấy ở trên nó dùng ```^``` và ```xor``` để ví dụ cho ta thấy rằng xor có thể hoạt động trên các kiểu dữ liệu khác nhau  
+
+```python
+#As a freshman starting in 2024, you should know something about XOR, so this task is for you to sign in.
+
+from pwn import xor
+#The Python pwntools library has a convenient xor() function that can XOR together data of different types and lengths
+from Crypto.Util.number import bytes_to_long
+
+key = b'New_Star_CTF'
+flag='flag{*******************}'
+
+m1 = bytes_to_long(bytes(flag[:13], encoding='utf-8'))
+m2 = flag[13:]
+
+c1 = m1 ^ bytes_to_long(key)
+c2 = xor(key, m2)
+print('c1=',c1)
+print('c2=',c2)
+
+'''
+c1= 8091799978721254458294926060841
+c2= b';:\x1c1<\x03>*\x10\x11u;'
+'''
+
+vậy đơn giản là ta xor kết quả của c1 và c2 với key và cộng kết quả lại là sẽ ra flag 
+
+
+```
+from pwn import *
+#The Python pwntools library has a convenient xor() function that can XOR together data of different types and lengths
+from Crypto.Util.number import *
+
+c1= 8091799978721254458294926060841
+c2= b';:\x1c1<\x03>*\x10\x11u;'
+
+key = b'New_Star_CTF'
+
+flag1 = (c1 ^ bytes_to_long(key))
+flag2 = xor(c2,key)
+flag = long_to_bytes(flag1) + flag2
+print(flag)
+```
+
+![here](/assets/images/crypzzz.png)

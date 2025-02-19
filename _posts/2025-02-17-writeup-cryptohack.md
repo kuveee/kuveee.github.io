@@ -65,4 +65,59 @@ ploi@PhuocLoiiiii:~/pwn/FSOP/_IO_FILE Arbitrary Address Read$ python3 test.py
 crypto{ASCII_pr1nt4bl3}
 ```
 
+### hex
+
+
+- khi ta mã hóa cái gì đó , bản mã thường có các bytes không phải là kí tự ascii . challenge này yêu cầu ta giải mã chuỗi hex thành các byte để có flag
+
+
+```
+63727970746f7b596f755f77696c6c5f62655f776f726b696e675f776974685f6865785f737472696e67735f615f6c6f747d
+```
+
+- vậy đơn giản là ta sẽ dùng ```byte.fromhex()``` để chuyển nó thành byte và lấy flag 
+
+
+```cs
+hex_to_byte = "63727970746f7b596f755f77696c6c5f62655f776f726b696e675f776974685f6865785f737472696e67735f615f6c6f747d"
+hex_bytes = bytes.fromhex(hex_to_byte)
+byte_hex = hex_bytes.hex()
+print(hex_bytes)
+print(byte_hex)
+```
+
+![here](/assets/images/crypp.png)
+
+1 cách khác là dùng ```shell``` trên terminal 
+
+
+```
+ xxd -r -p <<< "63727970746f7b596f755f77696c6c5f62655f776f726b696e675f776974685f6865785f737472696e67735f615f6c6f747d"
+```
+
+
+### base64 
+
+- 1 mã hóa phổ biến khác là base64 , cho phép biểu diễn dữ liệu nhị phân dưới dạng chuỗi ascii bằng bảng chữ cái gồm 64 kí tự . 1 kí tự chuỗi base64 mã hóa 6 chữ số nhị phân , do đó 4 kí tự base64 mã hóa 3 byte 
+
+```
+72bca9b68fc16ac7beeb8f849dca1d8a783e8acf9679bf9269f7bf
+```
+
+```
+Trong Python, sau khi nhập mô-đun base64 với import base64, bạn có thể sử dụng base64.b64encode()hàm. Hãy nhớ giải mã hex trước như mô tả thử thách nêu.
+```
+
+exp : 
+
+```python
+import base64
+
+bytestr = "72bca9b68fc16ac7beeb8f849dca1d8a783e8acf9679bf9269f7bf"
+hex_bytes = bytes.fromhex(bytestr)
+print(hex_bytes)
+print(base64.b64encode(hex_bytes))
+```
+
+![here](/assets/images/crypzzz.png)
 
