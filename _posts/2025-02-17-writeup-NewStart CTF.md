@@ -299,7 +299,7 @@ c2= b';:\x1c1<\x03>*\x10\x11u;'
 vậy đơn giản là ta xor kết quả của c1 và c2 với key và cộng kết quả lại là sẽ ra flag 
 
 
-```
+```python
 from pwn import *
 #The Python pwntools library has a convenient xor() function that can XOR together data of different types and lengths
 from Crypto.Util.number import *
@@ -316,3 +316,108 @@ print(flag)
 ```
 
 ![here](/assets/images/crypzzz.png)
+
+
+##### strangeking
+
+description: 
+
+```
+Một vị hoàng đế thích vẽ Sharp 5 muốn tiến bộ mỗi ngày, cho đến khi anh ta cưới một người mẫu, trở về điểm xuất phát và tặng miễn phí mọi thứ 😅 Đây là tin nhắn cuối cùng anh ta để lại: ksjr{EcxvpdErSvcDgdgEzxqjql}, lá cờ được bao quanh bằng văn bản thuần túy có thể đọc được
+```
+
+- dựa vào description ta có thể thấy rằng flag vẫn giữ nguyên index không thay đổi nên có lẽ đó là caesar 
+- format flag là flag{}  và flag bị mã hóa là ksjr{    f -> k với key là 5 , l -> s sẽ là 7 và a -> j sẽ là 9 vậy key tăng thêm 2 mỗi lần 
+
+exp:
+
+```python
+def caeasar(flag):
+    result = ""
+    shift = 5
+    for i in flag:
+        if i.isalpha():
+            start = ord('A') if i.isupper() else ord('a')
+            result += chr((ord(i) - start - shift) %26 + start)
+        else:
+            result += i
+        shift += 2
+    return result
+flag_encrypt = "ksjr{EcxvpdErSvcDgdgEzxqjql}"
+print(caeasar(flag_encrypt))
+```
+
+- đây là code encrypt: 
+
+```python
+def caesar(flag):
+    result = ""
+    key = 5
+    for i in flag:
+        start = ord('A') if i.isupper() else ord('a')
+        if i.isalpha():
+            result += chr((ord(i) - start + key) % 26 + start)
+        else:
+            result += i
+        key += 2
+    return result
+
+
+
+flag = "flag{PleaseDoNotStopLearing}"
+print(caesar(flag))
+```
+
+#####  Base
+
+- tên bài đã nói lên tất cả , ta chỉ cần chuyển đoạn này thành chuỗi xong rồi dùng base32 và base64 để giải mã nó 
+
+```cs
+This is a base question!
+
+4C4A575851324332474E324547554B494A5A4446513653434E564D444154545A4B354D45454D434E4959345536544B474D5134513D3D3D3D
+```
+
+exp: 
+
+```cs
+import base64
+
+hex_ = "4C4A575851324332474E324547554B494A5A4446513653434E564D444154545A4B354D45454D434E4959345536544B474D5134513D3D3D3D"
+
+text = bytes.fromhex(hex_).decode()
+
+b32decode = base64.b32decode(text)
+
+b64decode = base64.b64decode(b32decode)
+print(b64decode)
+```
+
+- và ta cũng cần tìm quá trình mã hóa của nó , trước hết nó sẽ chuyển chuỗi sang nhị phân , ví dụ "ctf" -> c -> 99 -> 01100011 , t -> 116 -> 01110100 , sau khi ghép lại thì ta có đoạn này ```011000110111010001100110``` , nếu nó nhỏ hơn 8 bit thì ta cần padding nó vào 
+
+- tiếp theo sẽ là cắt bỏ các số nhị phân và vì nó được mã hóa theo  base64 nên quy tắc là ( 2^6 =64 ) , nó sẽ cắt bớt theo lũy thừa của 2 
+
+- tiếp theo là chia nó thành từng nhóm 6 bit và ánh xạ với 1 kí tự trong bản base64
+
+```cs
+Nhị phân	Giá trị thập phân	  Ký tự Base64
+010011	    19	              T
+010110	    22	              W
+000101	    5	                F
+101110	    46	              u
+```
+
+- nếu độ dài không chia hết cho 3 thì base64 thêm padding "=" để đảm bảo độ dài chuỗi luôn là bội số của 4 
+- Ví dụ: "Ma" có 2 ký tự (16-bit), sau khi mã hóa sẽ thêm "="
+
+```
+"Ma" → "TWE="
+```
+
+- nếu chỉ có 1 bytes ( 8 bit) sẽ thêm == : 
+
+```cs
+"M" → "TQ=="
+```
+
+- lưu ý :  Base64 không phải là mã hóa bảo mật, nó chỉ là một phương pháp mã hóa dữ liệu thành dạng có thể in được , ứng dụng của nó là trong truyền dữ liệu nhị phân (hình ảnh , file) , mã hóa JSON , JWT , URL
