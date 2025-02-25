@@ -262,6 +262,38 @@ int __fastcall main(int argc, const char **argv, const char **envp)
 flag{Mak3Ff0rt_tO_5eArcH_F0r_th3_f14g_C0Rpse}
 ```
 
+##### ezAndroidStudy
+
+- đề cho ta 1 file .apk nên ta sẽ dùng JADX chuyển sang code java cho dễ đọc 
+
+- sau 1 lúc tim kiếm thì ta tìm được 1 hàm chứa đoạn đầu của flag , hoặc ta có thể search strings để tìm 
+
+![here](/assets/images/java.png)
+
+- dò thêm 1 tí thì mình tìm được flag4 , đây có lẽ là part4 
+![here](/assets/images/java1.png)
+
+- ở đây ta cũng có thêm 1 flag là part2 
+
+![here](/assets/images/java3.png)
+
+- part3
+
+![here](/kuveee.github.io/assets/images/java2.png)
+
+- lúc này có vẻ flag vẫn còn thiếu  , nên ta mở IDA lên xem thử : 
+
+đây sẽ là part cuối 
+![here](/kuveee.github.io/assets/images/java4.png)
+
+##### ez_debug
+
+- nó yêu cầu ta nhập flag , tên bài là ez_debug nên có lẽ cần mở IDA lên debug :>> 
+![here](/kuveee.github.io/assets/images/debug.png)
+
+
+
+
 #### crypto 
 
 ##### xor

@@ -1,5 +1,5 @@
 ---
-title: writeup format-string advance
+title: format-string advance
 date: 2025-02-14 00:00:00 +0800
 categories: [pwn]
 tags: [fsb]
