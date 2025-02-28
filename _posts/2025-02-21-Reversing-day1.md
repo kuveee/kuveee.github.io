@@ -5,14 +5,10 @@ categories: [rev]
 tags: [rev]
 author: "{{ site.author }}"
 layout: post
-private: true
+published: false
 ---
 
-{% if page.private == false or site.author == page.author %}
-  {{ content }}
-{% else %}
-  <p>Bài viết này chỉ dành cho tác giả.</p>
-{% endif %}
+
 
 
 ## Reversing ELF
