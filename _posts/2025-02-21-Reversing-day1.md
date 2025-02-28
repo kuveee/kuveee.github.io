@@ -3,9 +3,16 @@ title: Day1-reverse
 date: 2025-02-12 00:00:00 +0800
 categories: [rev]
 tags: [rev]
-author: "kuvee"
+author: "{{ site.author }}"
 layout: post
+private: true
 ---
+
+{% if page.private == false or site.author == page.author %}
+  {{ content }}
+{% else %}
+  <p>Bài viết này chỉ dành cho tác giả.</p>
+{% endif %}
 
 
 ## Reversing ELF
