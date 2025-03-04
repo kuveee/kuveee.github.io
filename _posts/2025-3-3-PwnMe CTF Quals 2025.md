@@ -7,7 +7,7 @@ author: "kuvee"
 layout: post
 ---
 
-# got
+## got
 
 checksec: 
 
@@ -76,7 +76,7 @@ p.send(p64(0x401036) + p64(exe.sym.shell))
 p.interactive()
 ```
 
-# einstein
+## einstein
 
 checksec: full giáp
 
