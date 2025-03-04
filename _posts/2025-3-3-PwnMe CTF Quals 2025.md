@@ -134,11 +134,11 @@ int __cdecl handle()
 
 - ở đây mình nhập 1 size rất lớn
 
-![here](/kuveee.github.io/assets/images/PWNme2025/1.png)
+![here](/assets/images/PWNme2025/1.png)
 
 - và nó nằm ngay dưới libc
 
-![here](/kuveee.github.io/assets/images/PWNme2025/2.png)
+![here](/assets/images/PWNme2025/2.png)
 
 - như ta đã nói thì trước hết ta cần biết địa chỉ libc , ở đây ta cần tấn công ```fsop``` , chi tiết thì ta có thể xem ở [here](https://github.com/nobodyisnobody/docs/tree/main/using.stdout.as.a.read.primitive/)  , ở đây mình chọn overwrite ```IO_write_PTR``` bằng byte ```\xff```  hoặc là ta có thể overwrite như link trên cũng được , và may mắn là ta có libc lẫn stack_address  
 - lúc đầu mình không leak được stack_address vì phiên bản libc bài cho không giống sever , sau khi build docker và lấy libc lại thì mới leak được stack :)))
