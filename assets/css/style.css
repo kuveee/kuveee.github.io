@@ -74,3 +74,21 @@
   border-radius: 50%;
   margin-right: 15px;
 }
+
+
+/* Thay đổi màu tiêu đề bài viết trên trang chủ */
+h2.post-title a {
+  color: #ff6600 !important; /* Màu cam, bạn có thể đổi mã màu */
+  text-decoration: none; /* Loại bỏ gạch chân */
+}
+
+/* Khi di chuột vào tiêu đề bài viết */
+h2.post-title a:hover {
+  color: #ff3300 !important; /* Màu cam đậm hơn */
+}
+
+
+/* Tiêu đề bài viết trong trang post */
+h1.post-title {
+  color: #0088cc !important; /* Màu xanh */
+}

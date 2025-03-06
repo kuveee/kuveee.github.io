@@ -1123,7 +1123,7 @@ __int64 sub_401B6D()
 vậy fini sẽ là ```sub_402960``` 
 
 Có thể thấy rằng:
-```
+``` 
 __libc_csu_init thực thi .init và .init_array
 __libc_csu_fini thực thi .fini và .fini_array
 ```
