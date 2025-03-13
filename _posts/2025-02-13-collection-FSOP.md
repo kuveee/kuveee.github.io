@@ -2,7 +2,7 @@
 title: writeup-FSOP
 date: 2025-02-12 00:00:00 +0800
 categories: [pwn]
-tags: [FSOP]
+tags: [FSOP,house_of_bot_cake]
 author: "kuvee"
 layout: post
 ---
