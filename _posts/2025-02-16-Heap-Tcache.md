@@ -5,6 +5,7 @@ categories: [pwn]
 tags: [Heap,Tcache]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 ## tổng quan về tcache 

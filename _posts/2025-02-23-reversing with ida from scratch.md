@@ -5,7 +5,7 @@ categories: [rev]
 tags: [rev]
 author: "kuvee"
 layout: post
-hidden: true
+published: false
 ---
 
 - ở IDA ta có thể setting như hình để mọi thứ dễ nhìn hơn , ta sẽ chọn options -> general  và chọn các option tùy thích (number of opcode bytes đôi lúc sẽ có ích)

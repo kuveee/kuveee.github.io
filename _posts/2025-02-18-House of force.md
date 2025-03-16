@@ -5,6 +5,7 @@ categories: [pwn]
 tags: [heap,House of force]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 điều kiện cần : 
