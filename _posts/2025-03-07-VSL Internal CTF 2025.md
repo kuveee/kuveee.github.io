@@ -5,6 +5,7 @@ categories: [writeup]
 tags: [pwn]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 - ở giải VSL lần này mình giải được full pwn (first solve 3 bài) và được top 5 , giải vừa kết thúc tầm 6 tiếng vì rảnh nên mình ghi writeup luôn :3 

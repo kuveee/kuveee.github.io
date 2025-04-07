@@ -5,6 +5,7 @@ categories: [writeup]
 tags: [reverse]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 ## rev-basic-0
