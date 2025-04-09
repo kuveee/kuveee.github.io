@@ -5,6 +5,7 @@ categories: [writeup]
 tags: [pwn]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 ## QuackQuack
