@@ -5,6 +5,7 @@ categories: [writeup]
 tags: [pwn,heap]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 ## recontruction

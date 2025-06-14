@@ -5,6 +5,7 @@ categories: [pwn]
 tags: [technical]
 author: "kuvee"
 layout: post
+published: false
 ---
 
 - hôm nay ta sẽ đến với 1 thử thách được biên dịch ở 1 phiên bản libc cao -> sẽ không còn các gadget hữu ích như **pop rdi** hay **pop rsi** nữa
