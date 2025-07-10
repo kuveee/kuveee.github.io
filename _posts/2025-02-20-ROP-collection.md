@@ -5,7 +5,6 @@ categories: [pwn]
 tags: [rop]
 author: "kuvee"
 layout: post
-published: false
 ---
 
 

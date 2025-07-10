@@ -5,7 +5,6 @@ categories: [pwn]
 tags: [FSOP,house_of_bot_cake]
 author: "kuvee"
 layout: post
-published: false
 ---
 
 - FSOP là 1 kĩ thuật tấn công cấu trúc của ```IO_FILE``` , có rất nhiều bài viết về kĩ thuật này ở google , ta có thể đọc 1 bài viết bằng tiếng việt ở đây [here](https://hackmd.io/@kyr04i/SkF_A-fnn) ... 

@@ -5,7 +5,6 @@ categories: [pwn]
 tags: [shellcode]
 author: "kuvee"
 layout: post
-published: false
 ---
 
 ## parity (byte chẵn lẻ)

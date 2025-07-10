@@ -5,7 +5,6 @@ categories: [pwn]
 tags: [fsb]
 author: "kuvee"
 layout: post
-published: false
 ---
 
 all file [here]

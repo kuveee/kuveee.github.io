@@ -5,7 +5,6 @@ categories: [writeup]
 tags: [pwn,writeup]
 author: "kuvee"
 layout: post
-published: false
 ---
 
 ## got
