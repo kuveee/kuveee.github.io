@@ -25,3 +25,21 @@ package-lock.json
 # Misc
 _sass/vendors
 assets/js/dist
+
+# Bỏ qua file writeup không muốn public
+_posts/2025-02-17-writeup-cryptohack.md
+
+# Bỏ qua file KCSC recruitment không muốn public
+_posts/2025-02-19-KCSC_recuirtment.md
+
+_posts/2025-02-17-NewStart CTF.md
+_posts/2025-03-07-Dreamhack.md
+_posts/2025-03-10-Reverse_dreamhack.md
+
+# Bỏ qua các file writeup không muốn public
+_posts/2025-02-21-Reversing-day1.md
+_posts/2025-02-16-Heap-Tcache.md
+_posts/2024-10-02-setcontext.md
+_posts/2025-02-23-reversing with ida from scratch.md
+_posts/2025-02-24.Code execution with a write primitive on last libc.md
+_posts/2025-02-26-reverse-note.md

